@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import distributorRouter from './distributor.route.js';
+import storeRouter from './store.route.js';
 
 const router = Router();
 
-// Admin routes will be added here
-// Example: router.use('/auth', adminAuthRoutes);
-// Example: router.use('/profile', adminProfileRoutes);
+router.use('/distributors', distributorRouter);
+router.use('/stores', storeRouter);
 
 export default router;
