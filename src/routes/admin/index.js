@@ -12,6 +12,12 @@ router.use('/auth', adminAuthRoutes);
 // Product Management Master Routes
 router.use('/product-management', productManagementRoutes);
 
+// Distributor Routes
+router.use('/distributors', distributorRouter);
+
+// Store Routes
+router.use('/stores', storeRouter);
+
 export default router;
 
 
