@@ -13,11 +13,12 @@
     "start": "node server.js",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch --runInBand",
-    "test:unit": "jest --testPathPatterns=tests/unit --runInBand --passWithNoTests",
-    "test:integration": "jest --testPathPatterns=tests/integration --runInBand --passWithNoTests",
-    "test:coverage": "jest --coverage --runInBand"
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch --runInBand",
+    "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathPatterns=tests/unit --runInBand --passWithNoTests",
+    "test:integration": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathPatterns=tests/integration --runInBand --passWithNoTests",
+    "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand",
+    "seed:admin": "node scripts/seedAdmin.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1028.0",
