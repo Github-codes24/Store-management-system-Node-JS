@@ -18,7 +18,9 @@
     "test:unit": "node --experimental-vm-modules node_modules/cross-env NODE_OPTIONS=--experimental-vm-modules jest/bin/jest.js --testPathPatterns=tests/unit --runInBand --passWithNoTests",
     "test:integration": "node --experimental-vm-modules node_modules/cross-env NODE_OPTIONS=--experimental-vm-modules jest/bin/jest.js --testPathPatterns=tests/integration --runInBand --passWithNoTests",
     "test:coverage": "node --experimental-vm-modules node_modules/cross-env NODE_OPTIONS=--experimental-vm-modules jest/bin/jest.js --coverage --runInBand",
-    "seed:admin": "node scripts/seedAdmin.js"
+    "seed:admin": "node scripts/seedAdmin.js",
+    "seed:distributors": "node scripts/seedDistributors.js",
+    "seed:stores": "node scripts/seedStores.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1028.0",
