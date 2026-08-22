@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Backend service for Store Management ERP system.",
+  "main": "server.js",
   "engines": {
     "node": ">=22.0.0"
   },
