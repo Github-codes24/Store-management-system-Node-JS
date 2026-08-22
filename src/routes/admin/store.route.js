@@ -5,6 +5,7 @@ import {
   getStoreById,
   getStores,
   updateStore,
+  getStoresDropdown,
 } from '../../controllers/admin/store.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
 import validate from '../../middlewares/validate.middleware.js';
@@ -21,6 +22,7 @@ router.use(adminAuth);
 
 router.post('/', validate(createStoreSchema), createStore);
 router.get('/', validate(getStoresQuerySchema), getStores);
+router.get('/dropdown', getStoresDropdown);
 router.get('/:id', getStoreById);
 router.put('/:id', validate(updateStoreSchema), updateStore);
 router.delete('/:id', deleteStore);

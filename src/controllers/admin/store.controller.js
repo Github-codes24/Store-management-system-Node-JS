@@ -157,3 +157,21 @@ export const deleteStore = async (req, res) => {
     })
   );
 };
+
+export const getStoresDropdown = async (_req, res) => {
+  const stores = await Store.find({ isDeleted: false })
+    .select('_id name storeCode')
+    .sort({ name: 1 });
+
+  const dropdownOptions = stores.map((store) => ({
+    label: store.name,
+    value: store._id.toString(),
+  }));
+
+  return res.status(200).json(
+    successResponse({
+      message: 'Stores dropdown list retrieved successfully',
+      data: dropdownOptions,
+    })
+  );
+};

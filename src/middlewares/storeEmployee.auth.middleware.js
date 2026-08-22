@@ -19,12 +19,8 @@ const storeEmployeeAuth = async (req, _res, next) => {
 
     const storeEmployee = await StoreEmployee.findById(decoded.id).select('-password');
 
-    if (!storeEmployee) {
+    if (!storeEmployee || storeEmployee.isDeleted) {
       return next(unauthorized('Store employee not found.'));
-    }
-
-    if (storeEmployee.status !== 'active') {
-      return next(unauthorized('Account is inactive or suspended.'));
     }
 
     req.storeEmployee = storeEmployee;

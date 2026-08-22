@@ -20,7 +20,8 @@
     "test:coverage": "node --experimental-vm-modules node_modules/cross-env NODE_OPTIONS=--experimental-vm-modules jest/bin/jest.js --coverage --runInBand",
     "seed:admin": "node scripts/seedAdmin.js",
     "seed:distributors": "node scripts/seedDistributors.js",
-    "seed:stores": "node scripts/seedStores.js"
+    "seed:stores": "node scripts/seedStores.js",
+    "seed:store-employees": "node scripts/seedStoreEmployees.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1028.0",
