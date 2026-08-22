@@ -4,6 +4,7 @@ import categoryRoutes from './category.routes.js';
 import subcategoryRoutes from './subcategory.routes.js';
 import brandRoutes from './brand.routes.js';
 import unitRoutes from './unit.routes.js';
+import attributeRoutes from './attribute.routes.js';
 
 const router = Router();
 
@@ -12,5 +13,6 @@ router.use('/categories', categoryRoutes);
 router.use('/subcategories', subcategoryRoutes);
 router.use('/brands', brandRoutes);
 router.use('/units', unitRoutes);
+router.use('/attributes', attributeRoutes);
 
 export default router;
