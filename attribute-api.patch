@@ -1,0 +1,2141 @@
+diff --git a/DB/connect.js b/DB/connect.js
+index fd8b961..c8b15cf 100644
+--- a/DB/connect.js
++++ b/DB/connect.js
+@@ -3,7 +3,7 @@ import dotenv from "dotenv";
+ dotenv.config();
+ const connectDB = async () => {
+     try {
+-        await mongoose.connect(process.env.DATABASE);
++        await mongoose.connect(process.env.MONGO_URI);
+         console.log("DB Connected");
+     } catch (err) {
+         console.log("DB Error:", err);
+diff --git a/Utility/createPaymentReq.js b/Utility/createPaymentReq.js
+index 913d403..0598731 100644
+--- a/Utility/createPaymentReq.js
++++ b/Utility/createPaymentReq.js
+@@ -1,42 +1,132 @@
++// import Razorpay from "razorpay";
++// import dotenv from "dotenv";
++// dotenv.config();
++
++// const razorpay = new Razorpay({
++//   key_id: process.env.RAZORPAY_KEY_ID,
++//   key_secret: process.env.RAZORPAY_KEY_SECRET,
++// });
++
++
++// export const createPaymentLink= async (invoiceDetails)=>{
++//       try { 
++
++//       // STEP 1: Create Payment Link
++//     const paymentDetails = await razorpay.paymentLink.create({
++//       amount: invoiceDetails.invoiceTotal.totalInvoiceValue* 100, // in paise
++//       currency: "INR",
++//       description: `Invoice Payment ${invoiceDetails.invoiceDetaile.InvoiceNumber}`,
++
++//       customer: {
++//         name: invoiceDetails.billToParty.partyName,
++//         // email: "test@gmail.com",
++//         // contact: "9999999999",
++//       },
++
++//       // notify: {
++//       //   sms: true,
++//       //   email: true,
++//       // },
++
++//       reminder_enable: true,
++
++//       notes: {
++//         invoiceNumber: invoiceDetails.invoiceDetaile.InvoiceNumber,
++//       },
++//     });
++//     return paymentDetails;
++//           } catch (error) {
++//         throw error;
++//       }
++ 
++//     }
++
++
++
++
+ import Razorpay from "razorpay";
+ import dotenv from "dotenv";
++
+ dotenv.config();
+ 
+-const razorpay = new Razorpay({
+-  key_id: process.env.RAZORPAY_KEY_ID,
+-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+-});
++let razorpay = null;
++
++// Razorpay configuration
++if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
++  razorpay = new Razorpay({
++    key_id: process.env.RAZORPAY_KEY_ID,
++    key_secret: process.env.RAZORPAY_KEY_SECRET,
++  });
++} else {
++  console.warn(
++    "Razorpay credentials are missing. Payment link functionality is disabled."
++  );
++}
++
++export const createPaymentLink = async (invoiceDetails) => {
++  try {
++    // Check Razorpay configuration
++    if (!razorpay) {
++      throw new Error(
++        "Razorpay is not configured. Please add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to the .env file."
++      );
++    }
++
++    // Validate invoice details
++    if (!invoiceDetails) {
++      throw new Error("Invoice details are required.");
++    }
++
++    if (
++      !invoiceDetails.invoiceTotal ||
++      invoiceDetails.invoiceTotal.totalInvoiceValue === undefined
++    ) {
++      throw new Error("Invoice total value is missing.");
++    }
+ 
++    if (
++      !invoiceDetails.invoiceDetaile ||
++      !invoiceDetails.invoiceDetaile.InvoiceNumber
++    ) {
++      throw new Error("Invoice number is missing.");
++    }
+ 
+-export const createPaymentLink= async (invoiceDetails)=>{
+-      try { 
++    if (
++      !invoiceDetails.billToParty ||
++      !invoiceDetails.billToParty.partyName
++    ) {
++      throw new Error("Customer/party name is missing.");
++    }
+ 
+-      // STEP 1: Create Payment Link
++    // Convert invoice amount to paise
++    const amount =
++      Number(invoiceDetails.invoiceTotal.totalInvoiceValue) * 100;
++
++    if (!Number.isFinite(amount) || amount <= 0) {
++      throw new Error("Invalid invoice amount.");
++    }
++
++    // Create Razorpay Payment Link
+     const paymentDetails = await razorpay.paymentLink.create({
+-      amount: invoiceDetails.invoiceTotal.totalInvoiceValue* 100, // in paise
++      amount,
+       currency: "INR",
++
+       description: `Invoice Payment ${invoiceDetails.invoiceDetaile.InvoiceNumber}`,
+ 
+       customer: {
+         name: invoiceDetails.billToParty.partyName,
+-        // email: "test@gmail.com",
+-        // contact: "9999999999",
+       },
+ 
+-      // notify: {
+-      //   sms: true,
+-      //   email: true,
+-      // },
+-
+       reminder_enable: true,
+ 
+       notes: {
+         invoiceNumber: invoiceDetails.invoiceDetaile.InvoiceNumber,
+       },
+     });
++
+     return paymentDetails;
+-          } catch (error) {
+-        throw error;
+-      }
+- 
+-    }
+\ No newline at end of file
++  } catch (error) {
++    console.error("Error creating Razorpay payment link:", error);
++    throw error;
++  }
++};
+\ No newline at end of file
+diff --git a/controllers/attributeController.js b/controllers/attributeController.js
+new file mode 100644
+index 0000000..72d3b70
+--- /dev/null
++++ b/controllers/attributeController.js
+@@ -0,0 +1,328 @@
++import Attribute from "../models/AttributeSchema.js";
++
++const normalizeArray = (value) => {
++  if (value === undefined || value === null || value === "") return [];
++
++  if (Array.isArray(value)) {
++    return value.map((item) => String(item).trim()).filter(Boolean);
++  }
++
++  return String(value)
++    .split(",")
++    .map((item) => item.trim())
++    .filter(Boolean);
++};
++
++// Create Attribute
++export const createAttribute = async (req, res) => {
++  try {
++    const { attribute, key, fieldType, appliesTo, options } = req.body;
++
++    if (!attribute || !key || !fieldType) {
++      return res.status(400).json({
++        success: false,
++        error: "attribute, key and fieldType are required",
++      });
++    }
++
++    const normalizedKey = String(key).trim().toLowerCase();
++
++    const existingAttribute = await Attribute.findOne({
++      key: normalizedKey,
++      isDeleted: false,
++    });
++
++    if (existingAttribute) {
++      return res.status(400).json({
++        success: false,
++        error: "Attribute with the same key already exists",
++      });
++    }
++
++    const newAttribute = new Attribute({
++      attribute: String(attribute).trim(),
++      key: normalizedKey,
++      fieldType,
++      appliesTo: normalizeArray(appliesTo),
++      options: normalizeArray(options),
++      createdBy: req.user.id,
++      creatorModel: req.user.creatorModel,
++    });
++
++    await newAttribute.save();
++
++    return res.status(201).json({
++      success: true,
++      message: "Attribute created successfully",
++      attribute: newAttribute,
++    });
++  } catch (error) {
++    console.error("Error creating attribute:", error);
++
++    if (error.name === "ValidationError") {
++      return res.status(400).json({
++        success: false,
++        error: error.message,
++      });
++    }
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
++
++// Get All Attributes
++// Search + Status Filter + Pagination
++export const getAllAttributes = async (req, res) => {
++  try {
++    const { search, status } = req.query;
++
++    const filter = {
++      isDeleted: false,
++    };
++
++    // Status filter
++    if (status !== undefined) {
++      if (status === "true" || status === "false") {
++        filter.status = status === "true";
++      } else if (status === "active") {
++        filter.status = true;
++      } else if (status === "inactive") {
++        filter.status = false;
++      }
++    }
++
++    // Search
++    if (search) {
++      filter.$or = [
++        { attribute: { $regex: search, $options: "i" } },
++        { key: { $regex: search, $options: "i" } },
++        { fieldType: { $regex: search, $options: "i" } },
++        { appliesTo: { $regex: search, $options: "i" } },
++      ];
++    }
++
++    // Pagination
++    const page = Math.max(parseInt(req.query.page) || 1, 1);
++    const limit = Math.min(
++      Math.max(parseInt(req.query.limit) || 10, 1),
++      100
++    );
++
++    const skip = (page - 1) * limit;
++
++    const totalDocuments = await Attribute.countDocuments(filter);
++
++    const attributes = await Attribute.find(filter)
++      .sort({ createdAt: -1 })
++      .skip(skip)
++      .limit(limit)
++      .populate("createdBy", "fullname role");
++
++    return res.status(200).json({
++      success: true,
++      currentPage: page,
++      totalPages: Math.ceil(totalDocuments / limit),
++      totalDocuments,
++      attributes,
++    });
++  } catch (error) {
++    console.error("Error fetching attributes:", error);
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
++
++// Get Attribute By ID
++export const getAttributeById = async (req, res) => {
++  try {
++    const { id } = req.params;
++
++    const attribute = await Attribute.findOne({
++      _id: id,
++      isDeleted: false,
++    }).populate("createdBy", "fullname role");
++
++    if (!attribute) {
++      return res.status(404).json({
++        success: false,
++        error: "Attribute not found",
++      });
++    }
++
++    return res.status(200).json({
++      success: true,
++      attribute,
++    });
++  } catch (error) {
++    console.error("Error fetching attribute:", error);
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
++
++// Update Attribute
++export const updateAttribute = async (req, res) => {
++  try {
++    const { id } = req.params;
++    const { attribute, key, fieldType, appliesTo, options } = req.body;
++
++    if (!attribute || !key || !fieldType) {
++      return res.status(400).json({
++        success: false,
++        error: "attribute, key and fieldType are required",
++      });
++    }
++
++    const normalizedKey = String(key).trim().toLowerCase();
++
++    const duplicate = await Attribute.findOne({
++      key: normalizedKey,
++      _id: { $ne: id },
++      isDeleted: false,
++    });
++
++    if (duplicate) {
++      return res.status(400).json({
++        success: false,
++        error: "Another attribute with the same key already exists",
++      });
++    }
++
++    const updatedAttribute = await Attribute.findOneAndUpdate(
++      {
++        _id: id,
++        isDeleted: false,
++      },
++      {
++        attribute: String(attribute).trim(),
++        key: normalizedKey,
++        fieldType,
++        appliesTo: normalizeArray(appliesTo),
++        options: normalizeArray(options),
++      },
++      {
++        new: true,
++        runValidators: true,
++      }
++    );
++
++    if (!updatedAttribute) {
++      return res.status(404).json({
++        success: false,
++        error: "Attribute not found or deleted",
++      });
++    }
++
++    return res.status(200).json({
++      success: true,
++      message: "Attribute updated successfully",
++      attribute: updatedAttribute,
++    });
++  } catch (error) {
++    console.error("Error updating attribute:", error);
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
++
++// Delete Attribute
++export const deleteAttribute = async (req, res) => {
++  try {
++    const { id } = req.params;
++
++    const attribute = await Attribute.findOneAndUpdate(
++      {
++        _id: id,
++        isDeleted: false,
++      },
++      {
++        isDeleted: true,
++      },
++      {
++        new: true,
++      }
++    );
++
++    if (!attribute) {
++      return res.status(404).json({
++        success: false,
++        error: "Attribute not found or already deleted",
++      });
++    }
++
++    return res.status(200).json({
++      success: true,
++      message: "Attribute deleted successfully",
++    });
++  } catch (error) {
++    console.error("Error deleting attribute:", error);
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
++
++// Active / Inactive Toggle
++export const updateAttributeStatus = async (req, res) => {
++  try {
++    const { id } = req.params;
++    const { status } = req.body;
++
++    if (typeof status !== "boolean") {
++      return res.status(400).json({
++        success: false,
++        error: "status must be a boolean",
++      });
++    }
++
++    const attribute = await Attribute.findOneAndUpdate(
++      {
++        _id: id,
++        isDeleted: false,
++      },
++      {
++        status,
++      },
++      {
++        new: true,
++        runValidators: true,
++      }
++    );
++
++    if (!attribute) {
++      return res.status(404).json({
++        success: false,
++        error: "Attribute not found or deleted",
++      });
++    }
++
++    return res.status(200).json({
++      success: true,
++      message: `Attribute ${
++        status ? "activated" : "deactivated"
++      } successfully`,
++      attribute,
++    });
++  } catch (error) {
++    console.error("Error updating attribute status:", error);
++
++    return res.status(500).json({
++      success: false,
++      error: "Internal server error",
++    });
++  }
++};
+\ No newline at end of file
+diff --git a/controllers/salesController.js b/controllers/salesController.js
+index 77c963c..91fead3 100644
+--- a/controllers/salesController.js
++++ b/controllers/salesController.js
+@@ -1,75 +1,614 @@
++// import SalesInvoice from "../models/SalesInvoiceSchema.js";
++// import User from "../models/UsersSchema.js";
++// import Employee from "../models/EmployeeSchema.js";
++// import SuperAdmin from "../models/sureAdminSchema.js";
++// import sendNotification from "../Utility/sendNotification.js";
++// import Razorpay from "razorpay";
++// import {createPaymentLink} from "../Utility/createPaymentReq.js";
++// import { generateEInvoice } from "../Utility/e-envoice.js";
++// const razorpay = new Razorpay({
++//   key_id: process.env.RAZORPAY_KEY_ID,
++//   key_secret: process.env.RAZORPAY_KEY_SECRET,
++// });
++
++// export const createSalesInvoice = async (req, res) => {
++//   try {
++//     const invoiceData = req.body;
++//     invoiceData.createdBy = req.user.id;
++//     invoiceData.creatorModel = req.user.creatorModel;
++
++//    // check is invoice already exists
++//     const existingInvoice = await SalesInvoice.findOne({
++//       "invoiceDetaile.InvoiceNumber": invoiceData.invoiceDetaile.InvoiceNumber,
++//     });
++//     if (existingInvoice) {
++//       return res
++//         .status(400)
++//         .json({ success: false, error: "Invoice already exists" });
++//     }
++//   //role base status change
++//     if (req.user.role === "sales" || req.user.role=== "sales/purchase") {
++//       invoiceData.status = "pending";
++//     } else {
++//       // create payment link
++//       const paymentLink = await createPaymentLink(invoiceData);
++//       invoiceData.paymentDetails = paymentLink;
++//       // generate e-invoice
++//       const generatedInvoice = await generateEInvoice(invoiceData);
++//       invoiceData.gstDetails = generatedInvoice;
++//       invoiceData.status = "approved";
++//     }
++//     // get auth user 
++//     let authUser;
++//     if(req.user.creatorModel == "Employee"){
++//       authUser = await Employee.findById(req.user.id).select("fullname");
++//     }else if(req.user.creatorModel == "User"){
++//       authUser = await User.findById(req.user.id).select("fullname");
++//     }else if(req.user.creatorModel == "SuperAdmin"){
++//       authUser = await SuperAdmin.findById(req.user.id).select("fullname");
++//     }
++//     // console.log(authUser)
++//     invoiceData.salesPersonName = authUser?.fullname;
++
++//     const invoice = new SalesInvoice(invoiceData);
++//     await invoice.save();
++
++//     // Trigger notification for HR
++//     await sendNotification({
++//         senderId: req.user.id,
++//         receiverRole: "HR",
++//         message: `New Sales Invoice created by ${authUser?.fullname || 'a user'}. Invoice Number: ${invoiceData.invoiceDetaile.InvoiceNumber}`,
++//         type: "sales"
++//     });
++
++//     return res
++//       .status(201)
++//       .json({
++//         success: true,
++//         data: invoice,
++//         message: "Sales invoice created successfully",
++//       });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const getAllSalesInvoice = async (req, res) => {
++//   try {
++//     const {
++//       page = 1,
++//       limit = 10,
++//       search = "",
++//       isDeleted,
++//       status,
++//       dateFrom,
++//       dateTo,
++//       ...filters
++//     } = req.query;
++//     let query = { isDeleted: false };
++//     // Role based access: sales account can only see their own created invoices
++//     if (req.user.role === "sales") {
++//       query.createdBy = req.user.id;
++//     }
++
++//     // Search functionality
++//     if (search) {
++//       query.$or = [
++//         { "invoiceHeader.GSTIN": { $regex: search, $options: "i" } },
++//         { "billToParty.partyName": { $regex: search, $options: "i" } },
++//         { "invoiceDetaile.InvoiceNumber": { $regex: search, $options: "i" } },
++//         { salesPersonName: { $regex: search, $options: "i" } },
++//       ];
++//     }
++
++//     if (req.user.role !== "sales") {
++//       if (isDeleted) {
++//         query.isDeleted = isDeleted;
++//       }
++//     }
++//     if (status) {
++//       query.status = status;
++//     }
++//     if (dateFrom && dateTo) {
++//       const d1 = new Date(dateFrom);
++//       const d2 = new Date(dateTo);
++//       d2.setHours(23, 59, 59, 999);
++//       query.createdAt = {
++//         $gte: d1,
++//         $lte: d2
++//       };
++//     }
++//     // Applying any extra filters passed
++//     Object.assign(query, filters);
++
++//     const skip = (page - 1) * limit;
++
++//     const invoices = await SalesInvoice.find(query)
++//       .populate("createdBy", "fullname email role profilePicture")
++//       .skip(skip)
++//       .limit(parseInt(limit))
++//       .sort({ createdAt: -1 });
++
++//     const total = await SalesInvoice.countDocuments(query);
++
++//     return res.status(200).json({
++//       success: true,
++//       stats:{
++//         totalInvoices:total,
++//         approvedInvoices:await SalesInvoice.countDocuments({status:"approved",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
++//         rejectedInvoices:await SalesInvoice.countDocuments({status:"rejected",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
++//         pendingInvoices:await SalesInvoice.countDocuments({status:"pending",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
++//       },
++//       pagination: {
++//         total,
++//         currentPage: parseInt(page),
++//         totalPages: Math.ceil(total / limit),
++//       },
++//       data: invoices,
++//     });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const getSalesInvoiceById = async (req, res) => {
++//   try {
++//     // console.log("req",req.params)
++//     const invoice = await SalesInvoice.findById(req.params.id).populate(
++//       "createdBy",
++//       "fullname email role profilePicture",
++//     );
++    
++//     if (!invoice || invoice.isDeleted) {
++//       if (req.user.role === "sales") {
++//         return res
++//           .status(404)
++//           .json({ success: false, error: "Sales invoice not found" });
++//       }
++//     }
++
++//     // Access control: sales role can only view their own invoice
++//     // console.log(invoice.createdBy._id.toString())
++//     // console.log(req.user.id)
++//     if (
++//       req.user.role === "sales" &&
++//       invoice.createdBy._id.toString() !== req.user.id
++//     ) {
++//       return res
++//         .status(403)
++//         .json({
++//           success: false,
++//           error: "Access denied: You can only view your own invoices",
++//         });
++//     }
++
++//     return res.status(200).json({ success: true, data: invoice });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const getSalesInvoiceByCreatedBy = async (req, res) => {
++//   try {
++//     const { page = 1, limit = 10, search = "", ...filters } = req.query;
++//     const { createdBy } = req.params;
++
++//     // Access control
++//     if (req.user.role === "sales" && createdBy !== req.user.id) {
++//       return res
++//         .status(403)
++//         .json({
++//           success: false,
++//           error: "Access denied: You can only view your own invoices",
++//         });
++//     }
++//     let query = {};
++//    if(req.user.role=="sales"){
++//     query = { isDeleted: false};
++//    }
++    
++
++//     // Search functionality
++//     if (search) {
++//       query.$or = [
++//         { "invoiceHeader.GSTIN": { $regex: search, $options: "i" } },
++//         { "billToParty.partyName": { $regex: search, $options: "i" } },
++//         { "invoiceDetaile.InvoiceNumber": { $regex: search, $options: "i" } },
++//       ];
++//     }
++
++//     // Applying any extra filters passed
++//     Object.assign(query, filters);
++
++//     const skip = (page - 1) * limit;
++
++//     const invoices = await SalesInvoice.find(query)
++//       .populate("createdBy", "fullname email role")
++//       .skip(skip)
++//       .limit(parseInt(limit))
++//       .sort({ createdAt: -1 });
++
++//     const total = await SalesInvoice.countDocuments(query);
++
++//     return res.status(200).json({
++//       success: true,
++//       pagination: {
++//         total,
++//         page: parseInt(page),
++//         pages: Math.ceil(total / limit),
++//       },
++//       data: invoices,
++//     });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const changeStatus = async (req, res) => {
++//   try {
++
++//     const allowedRoles = [
++//       "superAdmin",
++//       "manager",
++//       "HR",
++//     ];
++
++//     if (!allowedRoles.includes(req.user.role)) {
++//       return res.status(403).json({
++//         success: false,
++//         error:
++//           "Only HR, manager, or superAdmin can change status",
++//       });
++//     }
++
++//     const { status } = req.body;
++
++//     if (
++//       !["pending", "approved", "rejected"].includes(
++//         status
++//       )
++//     ) {
++//       return res.status(400).json({
++//         success: false,
++//         error:
++//           "Invalid status value",
++//       });
++//     }
++
++//     const invoice =
++//       await SalesInvoice.findById(req.params.id);
++
++//     if (!invoice || invoice.isDeleted) {
++//       return res.status(404).json({
++//         success: false,
++//         error: "Sales invoice not found",
++//       });
++//     }
++
++//     // =========================
++//     // PREVENT DUPLICATE IRN
++//     // =========================
++//     if (
++//       status === "approved" &&
++//       invoice.gstDetails?.Irn
++//     ) {
++//       return res.status(400).json({
++//         success: false,
++//         error:
++//           "E-Invoice already generated",
++//       });
++//     }
++
++//     // =========================
++//     // APPROVED FLOW
++//     // =========================
++//     if (status === "approved") {
++
++//       // 1. Generate E-Invoice
++//       const gstDetails =
++//         await generateEInvoice(invoice);
++
++//       // 2. Create payment link
++//       const paymentDetails =
++//         await createPaymentLink(invoice);
++
++//       // 3. Save details
++//       invoice.paymentDetails =
++//         paymentDetails;
++
++//       invoice.gstDetails =
++//         gstDetails;
++
++//       invoice.status = status;
++
++//       await invoice.save();
++//     }
++
++//     // =========================
++//     // OTHER STATUS
++//     // =========================
++//     else {
++//       invoice.status = status;
++//       await invoice.save();
++//     }
++
++//     return res.status(200).json({
++//       success: true,
++//       data: invoice,
++//       message:
++//         "Status changed successfully",
++//     });
++
++//   } catch (error) {
++
++//     return res.status(500).json({
++//       success: false,
++//       error: error.message,
++//     });
++//   }
++// };
++
++// export const updateSalesInvoice = async (req, res) => {
++//   try {
++//     const invoice = await SalesInvoice.findById(req.params.id);
++//     if (!invoice || invoice.isDeleted) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++
++//     if (
++//       req.user.role === "sales" &&
++//       invoice.createdBy.toString() !== req.user.id
++//     ) {
++//       return res.status(403).json({ success: false, error: "Access denied" });
++//     }
++//     if(req.body.status || req.body.isDeleted){
++//       return res.status(403).json({ success: false, error: "You cannot update status or isDeleted field." });
++//     }
++
++//     const updatedInvoice = await SalesInvoice.findByIdAndUpdate(
++//       req.params.id,
++//       req.body,
++//       { new: true, runValidators: true },
++//     );
++
++//     return res
++//       .status(200)
++//       .json({
++//         success: true,
++//         data: updatedInvoice,
++//         message: "Sales invoice updated successfully",
++//       });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const deleteSalesInvoice = async (req, res) => {
++//   try {
++//     const invoice = await SalesInvoice.findById(req.params.id);
++//     if (!invoice) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++
++//     if (req.user.role === "sales") {
++//       return res.status(403).json({ success: false, error: "Access denied" });
++//     }
++
++//     invoice.isDeleted = true;
++//     await invoice.save();
++
++//     return res
++//       .status(200)
++//       .json({ success: true, message: "Sales invoice deleted successfully" });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const permanentDeleteSalesInvoice = async (req, res) => {
++//   try {
++//     if (req.user.role === "sales") {
++//       return res.status(403).json({ success: false, error: "Access denied" });
++//     }
++//     const invoice = await SalesInvoice.findById(req.params.id);
++//     if (!invoice) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++
++//     await SalesInvoice.findByIdAndDelete(req.params.id);
++
++//     return res
++//       .status(200)
++//       .json({ success: true, message: "Sales invoice permanently deleted" });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const restoreSalesInvoice = async (req, res) => {
++//   try {
++//     const invoice = await SalesInvoice.findById(req.params.id);
++//     if (!invoice) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++
++//     if (req.user.role === "sales") {
++//       return res.status(403).json({ success: false, error: "Access denied" });
++//     }
++
++//     invoice.isDeleted = false;
++//     await invoice.save();
++
++//     return res
++//       .status(200)
++//       .json({ success: true, message: "Sales invoice restored successfully" });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const changePaidStatus = async (req, res) => {
++//   try {
++//     const { id } = req.params;
++//     const { isPaid, paymentMode } = req.body;
++//     const invoice = await SalesInvoice.findById(id);
++//     if (!invoice) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++
++//     if (req.user.role === "sales") {
++//       return res.status(403).json({ success: false, error: "Access denied" });
++//     }
++
++//     if (isPaid !== undefined) {
++//       invoice.isPaid = isPaid;
++//     }
++//     if (paymentMode !== undefined) {
++//       invoice.paymentMode = paymentMode;
++//     }
++//     await invoice.save();
++
++//     return res
++//       .status(200)
++//       .json({ success: true, message: "Sales invoice paid status updated successfully", data: invoice });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
++// export const getSalesInvoiceDetailsByInvoiceId = async (req, res) => {
++//   try {
++//     const id = req.params.id
++//     if(!id){
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Please provide invoice id" });
++//     }
++//     const invoice = await SalesInvoice.findById(id);
++//     if (!invoice) {
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice not found" });
++//     }
++//    if(invoice.isDeleted){
++//       return res
++//         .status(404)
++//         .json({ success: false, error: "Sales invoice is deleted" });
++//    }
++//    if(invoice.status=="pending"){
++//     return res
++//       .status(404)
++//       .json({ success: false, error: "Sales invoice is pending" });
++//    }
++//    if(invoice.status=="rejected"){
++//     return res
++//       .status(404)
++//       .json({ success: false, error: "Sales invoice is rejected" });
++//    }
++
++   
++//     return res.status(200).json({ success: true, data: invoice });
++//   } catch (error) {
++//     return res.status(500).json({ success: false, error: error.message });
++//   }
++// };
++
+ import SalesInvoice from "../models/SalesInvoiceSchema.js";
+ import User from "../models/UsersSchema.js";
+ import Employee from "../models/EmployeeSchema.js";
+ import SuperAdmin from "../models/sureAdminSchema.js";
+ import sendNotification from "../Utility/sendNotification.js";
+-import Razorpay from "razorpay";
+-import {createPaymentLink} from "../Utility/createPaymentReq.js";
++import { createPaymentLink } from "../Utility/createPaymentReq.js";
+ import { generateEInvoice } from "../Utility/e-envoice.js";
+-const razorpay = new Razorpay({
+-  key_id: process.env.RAZORPAY_KEY_ID,
+-  key_secret: process.env.RAZORPAY_KEY_SECRET,
+-});
+ 
+ export const createSalesInvoice = async (req, res) => {
+   try {
+     const invoiceData = req.body;
++
+     invoiceData.createdBy = req.user.id;
+     invoiceData.creatorModel = req.user.creatorModel;
+ 
+-   // check is invoice already exists
++    // Check if invoice already exists
+     const existingInvoice = await SalesInvoice.findOne({
+-      "invoiceDetaile.InvoiceNumber": invoiceData.invoiceDetaile.InvoiceNumber,
++      "invoiceDetaile.InvoiceNumber":
++        invoiceData.invoiceDetaile.InvoiceNumber,
+     });
++
+     if (existingInvoice) {
+-      return res
+-        .status(400)
+-        .json({ success: false, error: "Invoice already exists" });
++      return res.status(400).json({
++        success: false,
++        error: "Invoice already exists",
++      });
+     }
+-  //role base status change
+-    if (req.user.role === "sales" || req.user.role=== "sales/purchase") {
++
++    // Role based status change
++    if (
++      req.user.role === "sales" ||
++      req.user.role === "sales/purchase"
++    ) {
+       invoiceData.status = "pending";
+     } else {
+-      // create payment link
++      // Create payment link
+       const paymentLink = await createPaymentLink(invoiceData);
++
+       invoiceData.paymentDetails = paymentLink;
+-      // generate e-invoice
++
++      // Generate e-invoice
+       const generatedInvoice = await generateEInvoice(invoiceData);
++
+       invoiceData.gstDetails = generatedInvoice;
+       invoiceData.status = "approved";
+     }
+-    // get auth user 
++
++    // Get authenticated user
+     let authUser;
+-    if(req.user.creatorModel == "Employee"){
++
++    if (req.user.creatorModel === "Employee") {
+       authUser = await Employee.findById(req.user.id).select("fullname");
+-    }else if(req.user.creatorModel == "User"){
++    } else if (req.user.creatorModel === "User") {
+       authUser = await User.findById(req.user.id).select("fullname");
+-    }else if(req.user.creatorModel == "SuperAdmin"){
++    } else if (req.user.creatorModel === "SuperAdmin") {
+       authUser = await SuperAdmin.findById(req.user.id).select("fullname");
+     }
+-    // console.log(authUser)
++
+     invoiceData.salesPersonName = authUser?.fullname;
+ 
+     const invoice = new SalesInvoice(invoiceData);
++
+     await invoice.save();
+ 
+     // Trigger notification for HR
+     await sendNotification({
+-        senderId: req.user.id,
+-        receiverRole: "HR",
+-        message: `New Sales Invoice created by ${authUser?.fullname || 'a user'}. Invoice Number: ${invoiceData.invoiceDetaile.InvoiceNumber}`,
+-        type: "sales"
++      senderId: req.user.id,
++      receiverRole: "HR",
++      message: `New Sales Invoice created by ${
++        authUser?.fullname || "a user"
++      }. Invoice Number: ${
++        invoiceData.invoiceDetaile.InvoiceNumber
++      }`,
++      type: "sales",
+     });
+ 
+-    return res
+-      .status(201)
+-      .json({
+-        success: true,
+-        data: invoice,
+-        message: "Sales invoice created successfully",
+-      });
++    return res.status(201).json({
++      success: true,
++      data: invoice,
++      message: "Sales invoice created successfully",
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+@@ -85,8 +624,12 @@ export const getAllSalesInvoice = async (req, res) => {
+       dateTo,
+       ...filters
+     } = req.query;
+-    let query = { isDeleted: false };
+-    // Role based access: sales account can only see their own created invoices
++
++    let query = {
++      isDeleted: false,
++    };
++
++    // Sales account can only see their own invoices
+     if (req.user.role === "sales") {
+       query.createdBy = req.user.id;
+     }
+@@ -94,159 +637,261 @@ export const getAllSalesInvoice = async (req, res) => {
+     // Search functionality
+     if (search) {
+       query.$or = [
+-        { "invoiceHeader.GSTIN": { $regex: search, $options: "i" } },
+-        { "billToParty.partyName": { $regex: search, $options: "i" } },
+-        { "invoiceDetaile.InvoiceNumber": { $regex: search, $options: "i" } },
+-        { salesPersonName: { $regex: search, $options: "i" } },
++        {
++          "invoiceHeader.GSTIN": {
++            $regex: search,
++            $options: "i",
++          },
++        },
++        {
++          "billToParty.partyName": {
++            $regex: search,
++            $options: "i",
++          },
++        },
++        {
++          "invoiceDetaile.InvoiceNumber": {
++            $regex: search,
++            $options: "i",
++          },
++        },
++        {
++          salesPersonName: {
++            $regex: search,
++            $options: "i",
++          },
++        },
+       ];
+     }
+ 
+     if (req.user.role !== "sales") {
+-      if (isDeleted) {
++      if (isDeleted !== undefined) {
+         query.isDeleted = isDeleted;
+       }
+     }
++
+     if (status) {
+       query.status = status;
+     }
++
++    // Date filter
+     if (dateFrom && dateTo) {
+       const d1 = new Date(dateFrom);
+       const d2 = new Date(dateTo);
++
+       d2.setHours(23, 59, 59, 999);
++
+       query.createdAt = {
+         $gte: d1,
+-        $lte: d2
++        $lte: d2,
+       };
+     }
+-    // Applying any extra filters passed
++
++    // Additional filters
+     Object.assign(query, filters);
+ 
+     const skip = (page - 1) * limit;
+ 
+     const invoices = await SalesInvoice.find(query)
+-      .populate("createdBy", "fullname email role profilePicture")
++      .populate(
++        "createdBy",
++        "fullname email role profilePicture"
++      )
+       .skip(skip)
+       .limit(parseInt(limit))
+-      .sort({ createdAt: -1 });
++      .sort({
++        createdAt: -1,
++      });
+ 
+     const total = await SalesInvoice.countDocuments(query);
+ 
++    const approvedQuery = {
++      status: "approved",
++      isDeleted: false,
++      ...(req.user.role === "sales"
++        ? { createdBy: req.user.id }
++        : {}),
++    };
++
++    const rejectedQuery = {
++      status: "rejected",
++      isDeleted: false,
++      ...(req.user.role === "sales"
++        ? { createdBy: req.user.id }
++        : {}),
++    };
++
++    const pendingQuery = {
++      status: "pending",
++      isDeleted: false,
++      ...(req.user.role === "sales"
++        ? { createdBy: req.user.id }
++        : {}),
++    };
++
+     return res.status(200).json({
+       success: true,
+-      stats:{
+-        totalInvoices:total,
+-        approvedInvoices:await SalesInvoice.countDocuments({status:"approved",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
+-        rejectedInvoices:await SalesInvoice.countDocuments({status:"rejected",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
+-        pendingInvoices:await SalesInvoice.countDocuments({status:"pending",...(req.user.role=="sales"?{createdBy:req.user.id}:{}),isDeleted:false}),
++
++      stats: {
++        totalInvoices: total,
++
++        approvedInvoices:
++          await SalesInvoice.countDocuments(approvedQuery),
++
++        rejectedInvoices:
++          await SalesInvoice.countDocuments(rejectedQuery),
++
++        pendingInvoices:
++          await SalesInvoice.countDocuments(pendingQuery),
+       },
++
+       pagination: {
+         total,
+         currentPage: parseInt(page),
+         totalPages: Math.ceil(total / limit),
+       },
++
+       data: invoices,
+     });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+ export const getSalesInvoiceById = async (req, res) => {
+   try {
+-    // console.log("req",req.params)
+-    const invoice = await SalesInvoice.findById(req.params.id).populate(
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    ).populate(
+       "createdBy",
+-      "fullname email role profilePicture",
++      "fullname email role profilePicture"
+     );
+-    
++
+     if (!invoice || invoice.isDeleted) {
+-      if (req.user.role === "sales") {
+-        return res
+-          .status(404)
+-          .json({ success: false, error: "Sales invoice not found" });
+-      }
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+-    // Access control: sales role can only view their own invoice
+-    // console.log(invoice.createdBy._id.toString())
+-    // console.log(req.user.id)
++    // Sales user can only view their own invoice
+     if (
+       req.user.role === "sales" &&
+       invoice.createdBy._id.toString() !== req.user.id
+     ) {
+-      return res
+-        .status(403)
+-        .json({
+-          success: false,
+-          error: "Access denied: You can only view your own invoices",
+-        });
++      return res.status(403).json({
++        success: false,
++        error:
++          "Access denied: You can only view your own invoices",
++      });
+     }
+ 
+-    return res.status(200).json({ success: true, data: invoice });
++    return res.status(200).json({
++      success: true,
++      data: invoice,
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+ export const getSalesInvoiceByCreatedBy = async (req, res) => {
+   try {
+-    const { page = 1, limit = 10, search = "", ...filters } = req.query;
++    const {
++      page = 1,
++      limit = 10,
++      search = "",
++      ...filters
++    } = req.query;
++
+     const { createdBy } = req.params;
+ 
+     // Access control
+-    if (req.user.role === "sales" && createdBy !== req.user.id) {
+-      return res
+-        .status(403)
+-        .json({
+-          success: false,
+-          error: "Access denied: You can only view your own invoices",
+-        });
++    if (
++      req.user.role === "sales" &&
++      createdBy !== req.user.id
++    ) {
++      return res.status(403).json({
++        success: false,
++        error:
++          "Access denied: You can only view your own invoices",
++      });
+     }
++
+     let query = {};
+-   if(req.user.role=="sales"){
+-    query = { isDeleted: false};
+-   }
+-    
++
++    if (req.user.role === "sales") {
++      query.isDeleted = false;
++    }
+ 
+     // Search functionality
+     if (search) {
+       query.$or = [
+-        { "invoiceHeader.GSTIN": { $regex: search, $options: "i" } },
+-        { "billToParty.partyName": { $regex: search, $options: "i" } },
+-        { "invoiceDetaile.InvoiceNumber": { $regex: search, $options: "i" } },
++        {
++          "invoiceHeader.GSTIN": {
++            $regex: search,
++            $options: "i",
++          },
++        },
++        {
++          "billToParty.partyName": {
++            $regex: search,
++            $options: "i",
++          },
++        },
++        {
++          "invoiceDetaile.InvoiceNumber": {
++            $regex: search,
++            $options: "i",
++          },
++        },
+       ];
+     }
+ 
+-    // Applying any extra filters passed
+     Object.assign(query, filters);
+ 
+     const skip = (page - 1) * limit;
+ 
+     const invoices = await SalesInvoice.find(query)
+-      .populate("createdBy", "fullname email role")
++      .populate(
++        "createdBy",
++        "fullname email role"
++      )
+       .skip(skip)
+       .limit(parseInt(limit))
+-      .sort({ createdAt: -1 });
++      .sort({
++        createdAt: -1,
++      });
+ 
+     const total = await SalesInvoice.countDocuments(query);
+ 
+     return res.status(200).json({
+       success: true,
++
+       pagination: {
+         total,
+         page: parseInt(page),
+         pages: Math.ceil(total / limit),
+       },
++
+       data: invoices,
+     });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+ export const changeStatus = async (req, res) => {
+   try {
+-
+     const allowedRoles = [
+       "superAdmin",
+       "manager",
+@@ -264,19 +909,17 @@ export const changeStatus = async (req, res) => {
+     const { status } = req.body;
+ 
+     if (
+-      !["pending", "approved", "rejected"].includes(
+-        status
+-      )
++      !["pending", "approved", "rejected"].includes(status)
+     ) {
+       return res.status(400).json({
+         success: false,
+-        error:
+-          "Invalid status value",
++        error: "Invalid status value",
+       });
+     }
+ 
+-    const invoice =
+-      await SalesInvoice.findById(req.params.id);
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    );
+ 
+     if (!invoice || invoice.isDeleted) {
+       return res.status(404).json({
+@@ -285,62 +928,51 @@ export const changeStatus = async (req, res) => {
+       });
+     }
+ 
+-    // =========================
+-    // PREVENT DUPLICATE IRN
+-    // =========================
++    // Prevent duplicate E-Invoice
+     if (
+       status === "approved" &&
+       invoice.gstDetails?.Irn
+     ) {
+       return res.status(400).json({
+         success: false,
+-        error:
+-          "E-Invoice already generated",
++        error: "E-Invoice already generated",
+       });
+     }
+ 
+-    // =========================
+-    // APPROVED FLOW
+-    // =========================
++    // Approved flow
+     if (status === "approved") {
+-
+-      // 1. Generate E-Invoice
++      // Generate E-Invoice
+       const gstDetails =
+         await generateEInvoice(invoice);
+ 
+-      // 2. Create payment link
++      // Create payment link
+       const paymentDetails =
+         await createPaymentLink(invoice);
+ 
+-      // 3. Save details
++      // Save payment details
+       invoice.paymentDetails =
+         paymentDetails;
+ 
++      // Save GST details
+       invoice.gstDetails =
+         gstDetails;
+ 
+       invoice.status = status;
+ 
+       await invoice.save();
+-    }
+-
+-    // =========================
+-    // OTHER STATUS
+-    // =========================
+-    else {
++    } else {
++      // Pending / Rejected
+       invoice.status = status;
++
+       await invoice.save();
+     }
+ 
+     return res.status(200).json({
+       success: true,
+       data: invoice,
+-      message:
+-        "Status changed successfully",
++      message: "Status changed successfully",
+     });
+-
+   } catch (error) {
+-
+     return res.status(500).json({
+       success: false,
+       error: error.message,
+@@ -350,175 +982,284 @@ export const changeStatus = async (req, res) => {
+ 
+ export const updateSalesInvoice = async (req, res) => {
+   try {
+-    const invoice = await SalesInvoice.findById(req.params.id);
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    );
++
+     if (!invoice || invoice.isDeleted) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+     if (
+       req.user.role === "sales" &&
+       invoice.createdBy.toString() !== req.user.id
+     ) {
+-      return res.status(403).json({ success: false, error: "Access denied" });
++      return res.status(403).json({
++        success: false,
++        error: "Access denied",
++      });
+     }
+-    if(req.body.status || req.body.isDeleted){
+-      return res.status(403).json({ success: false, error: "You cannot update status or isDeleted field." });
++
++    // Do not allow status or delete update
++    if (
++      req.body.status !== undefined ||
++      req.body.isDeleted !== undefined
++    ) {
++      return res.status(403).json({
++        success: false,
++        error:
++          "You cannot update status or isDeleted field.",
++      });
+     }
+ 
+-    const updatedInvoice = await SalesInvoice.findByIdAndUpdate(
+-      req.params.id,
+-      req.body,
+-      { new: true, runValidators: true },
+-    );
++    const updatedInvoice =
++      await SalesInvoice.findByIdAndUpdate(
++        req.params.id,
++        req.body,
++        {
++          new: true,
++          runValidators: true,
++        }
++      );
+ 
+-    return res
+-      .status(200)
+-      .json({
+-        success: true,
+-        data: updatedInvoice,
+-        message: "Sales invoice updated successfully",
+-      });
++    return res.status(200).json({
++      success: true,
++      data: updatedInvoice,
++      message: "Sales invoice updated successfully",
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+ export const deleteSalesInvoice = async (req, res) => {
+   try {
+-    const invoice = await SalesInvoice.findById(req.params.id);
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    );
++
+     if (!invoice) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+     if (req.user.role === "sales") {
+-      return res.status(403).json({ success: false, error: "Access denied" });
++      return res.status(403).json({
++        success: false,
++        error: "Access denied",
++      });
+     }
+ 
++    // Soft delete
+     invoice.isDeleted = true;
++
+     await invoice.save();
+ 
+-    return res
+-      .status(200)
+-      .json({ success: true, message: "Sales invoice deleted successfully" });
++    return res.status(200).json({
++      success: true,
++      message:
++        "Sales invoice deleted successfully",
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+-export const permanentDeleteSalesInvoice = async (req, res) => {
++export const permanentDeleteSalesInvoice = async (
++  req,
++  res
++) => {
+   try {
+     if (req.user.role === "sales") {
+-      return res.status(403).json({ success: false, error: "Access denied" });
++      return res.status(403).json({
++        success: false,
++        error: "Access denied",
++      });
+     }
+-    const invoice = await SalesInvoice.findById(req.params.id);
++
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    );
++
+     if (!invoice) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+-    await SalesInvoice.findByIdAndDelete(req.params.id);
++    await SalesInvoice.findByIdAndDelete(
++      req.params.id
++    );
+ 
+-    return res
+-      .status(200)
+-      .json({ success: true, message: "Sales invoice permanently deleted" });
++    return res.status(200).json({
++      success: true,
++      message:
++        "Sales invoice permanently deleted",
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+-export const restoreSalesInvoice = async (req, res) => {
++export const restoreSalesInvoice = async (
++  req,
++  res
++) => {
+   try {
+-    const invoice = await SalesInvoice.findById(req.params.id);
++    const invoice = await SalesInvoice.findById(
++      req.params.id
++    );
++
+     if (!invoice) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+     if (req.user.role === "sales") {
+-      return res.status(403).json({ success: false, error: "Access denied" });
++      return res.status(403).json({
++        success: false,
++        error: "Access denied",
++      });
+     }
+ 
+     invoice.isDeleted = false;
++
+     await invoice.save();
+ 
+-    return res
+-      .status(200)
+-      .json({ success: true, message: "Sales invoice restored successfully" });
++    return res.status(200).json({
++      success: true,
++      message:
++        "Sales invoice restored successfully",
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+-export const changePaidStatus = async (req, res) => {
++export const changePaidStatus = async (
++  req,
++  res
++) => {
+   try {
+     const { id } = req.params;
+-    const { isPaid, paymentMode } = req.body;
++
++    const {
++      isPaid,
++      paymentMode,
++    } = req.body;
++
+     const invoice = await SalesInvoice.findById(id);
++
+     if (!invoice) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
+     }
+ 
+     if (req.user.role === "sales") {
+-      return res.status(403).json({ success: false, error: "Access denied" });
++      return res.status(403).json({
++        success: false,
++        error: "Access denied",
++      });
+     }
+ 
+     if (isPaid !== undefined) {
+       invoice.isPaid = isPaid;
+     }
++
+     if (paymentMode !== undefined) {
+       invoice.paymentMode = paymentMode;
+     }
++
+     await invoice.save();
+ 
+-    return res
+-      .status(200)
+-      .json({ success: true, message: "Sales invoice paid status updated successfully", data: invoice });
++    return res.status(200).json({
++      success: true,
++      message:
++        "Sales invoice paid status updated successfully",
++      data: invoice,
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+ 
+-export const getSalesInvoiceDetailsByInvoiceId = async (req, res) => {
++export const getSalesInvoiceDetailsByInvoiceId = async (
++  req,
++  res
++) => {
+   try {
+-    const id = req.params.id
+-    if(!id){
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Please provide invoice id" });
++    const { id } = req.params;
++
++    if (!id) {
++      return res.status(404).json({
++        success: false,
++        error: "Please provide invoice id",
++      });
+     }
++
+     const invoice = await SalesInvoice.findById(id);
++
+     if (!invoice) {
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice not found" });
+-    }
+-   if(invoice.isDeleted){
+-      return res
+-        .status(404)
+-        .json({ success: false, error: "Sales invoice is deleted" });
+-   }
+-   if(invoice.status=="pending"){
+-    return res
+-      .status(404)
+-      .json({ success: false, error: "Sales invoice is pending" });
+-   }
+-   if(invoice.status=="rejected"){
+-    return res
+-      .status(404)
+-      .json({ success: false, error: "Sales invoice is rejected" });
+-   }
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice not found",
++      });
++    }
+ 
+-   
+-    return res.status(200).json({ success: true, data: invoice });
++    if (invoice.isDeleted) {
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice is deleted",
++      });
++    }
++
++    if (invoice.status === "pending") {
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice is pending",
++      });
++    }
++
++    if (invoice.status === "rejected") {
++      return res.status(404).json({
++        success: false,
++        error: "Sales invoice is rejected",
++      });
++    }
++
++    return res.status(200).json({
++      success: true,
++      data: invoice,
++    });
+   } catch (error) {
+-    return res.status(500).json({ success: false, error: error.message });
++    return res.status(500).json({
++      success: false,
++      error: error.message,
++    });
+   }
+ };
+\ No newline at end of file
+diff --git a/models/AttributeSchema.js b/models/AttributeSchema.js
+new file mode 100644
+index 0000000..ab493c6
+--- /dev/null
++++ b/models/AttributeSchema.js
+@@ -0,0 +1,70 @@
++import mongoose from "mongoose";
++
++const attributeSchema = new mongoose.Schema(
++  {
++    attribute: {
++      type: String,
++      required: true,
++      trim: true,
++    },
++
++    key: {
++      type: String,
++      required: true,
++      trim: true,
++      lowercase: true,
++    },
++
++    fieldType: {
++      type: String,
++      required: true,
++      enum: [
++        "Multi-select",
++        "Color Picker",
++        "Dropdown",
++        "Text",
++        "Date",
++        "Number",
++      ],
++    },
++
++    appliesTo: {
++      type: [String],
++      default: [],
++    },
++
++    options: {
++      type: [String],
++      default: [],
++    },
++
++    status: {
++      type: Boolean,
++      default: true,
++    },
++
++    isDeleted: {
++      type: Boolean,
++      default: false,
++    },
++
++    createdBy: {
++      type: mongoose.Schema.Types.ObjectId,
++      refPath: "creatorModel",
++    },
++
++    creatorModel: {
++      type: String,
++      enum: ["User", "Employee", "SuperAdmin"],
++    },
++  },
++  {
++    timestamps: true,
++  }
++);
++
++const Attribute =
++  mongoose.models.Attribute ||
++  mongoose.model("Attribute", attributeSchema);
++
++export default Attribute;
+\ No newline at end of file
+diff --git a/routes/attributeRoute.route.js b/routes/attributeRoute.route.js
+new file mode 100644
+index 0000000..4f297cb
+--- /dev/null
++++ b/routes/attributeRoute.route.js
+@@ -0,0 +1,37 @@
++import express from "express";
++
++import {
++  createAttribute,
++  getAllAttributes,
++  getAttributeById,
++  updateAttribute,
++  deleteAttribute,
++  updateAttributeStatus,
++} from "../controllers/attributeController.js";
++
++import { authenticate } from "../middlewares/authenticate.js";
++
++const router = express.Router();
++
++router.use(authenticate);
++
++// Create Attribute
++router.post("/create", createAttribute);
++
++// Get All Attributes
++// Search + Status + Pagination
++router.get("/all", getAllAttributes);
++
++// Get Attribute By ID
++router.get("/get/:id", getAttributeById);
++
++// Update Attribute
++router.put("/update/:id", updateAttribute);
++
++// Delete Attribute
++router.delete("/delete/:id", deleteAttribute);
++
++// Active / Inactive
++router.put("/update-status/:id", updateAttributeStatus);
++
++export default router;
+\ No newline at end of file
+diff --git a/server.js b/server.js
+index 22e63a9..6f3234d 100644
+--- a/server.js
++++ b/server.js
+@@ -22,6 +22,7 @@ import errorMiddleware from "./middlewares/error-middleware.js";
+ import superAdminAuth from "./routes/superAdmin/superAdminAuth.route.js";
+ import transactionRouter from "./routes/userManagement/Transaction.route.js";
+ import publicSalesInfoRouter from "./routes/sales/publicSalesInfo.route.js";
++import attributeRouter from "./routes/attributeRoute.route.js";
+ import cookieParser from "cookie-parser";
+ import dns from "dns";
+ 
+@@ -31,11 +32,12 @@ dns.setDefaultResultOrder("ipv4first");
+ dotenv.config();
+ 
+ const app = express();
+-const PORT = process.env.PORT ;
++const PORT = process.env.PORT;
+ 
+ app.use(cors());
+ app.use(express.json());
+ app.use(cookieParser());
++
+ app.use("/api/v1/auth", router);
+ app.use("/api/v1/admin", adminRouter);
+ app.use("/api/v1/sales/quotation", quotationRouter);
+@@ -53,16 +55,20 @@ app.use("/api/v1/employee-management", employeeRouter);
+ app.use("/api/v1/notifications", notificationRouter);
+ app.use("/api/v1/superAdmin/auth", superAdminAuth);
+ app.use("/api/v1/profile", profileRouter);
+-app.use("/api/v1/user-management",transactionRouter);
++app.use("/api/v1/user-management", transactionRouter);
+ app.use("/api/v1/public/sales-info", publicSalesInfoRouter);
+ 
+-app.use(errorMiddleware);
++// Attribute APIs
++app.use("/api/v1/product/attribute", attributeRouter);
+ 
+-connectDB().then(() => {
+-    app.listen(PORT, () => {
+-        console.log(`Server is running on http://localhost:${PORT}`);
+-    });
+-}).catch((error) => {
+-    console.error("Database connection error:", error);
+-});
++app.use(errorMiddleware);
+ 
++connectDB()
++    .then(() => {
++        app.listen(PORT, () => {
++            console.log(`Server is running on http://localhost:${PORT}`);
++        });
++    })
++    .catch((error) => {
++        console.error("Database connection error:", error);
++    });
+\ No newline at end of file
