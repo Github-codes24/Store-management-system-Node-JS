@@ -1,7 +1,14 @@
+import mongoose from 'mongoose';
+
 import Tax from '../../../models/tax.model.js';
+
 import { successResponse } from '../../../utils/api-response.js';
 import { notFound, conflict } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
+
+const ProductType = mongoose.model('ProductType');
+const Category = mongoose.model('Category');
+const Subcategory = mongoose.model('Subcategory');
 
 // CREATE TAX
 export const createTax = async (req, res, next) => {
@@ -15,9 +22,9 @@ export const createTax = async (req, res, next) => {
     } = req.body;
 
     const existingTax = await Tax.findOne({
-      productType: productType.trim(),
-      category: category.trim(),
-      subcategory: subcategory.trim(),
+      productType,
+      category,
+      subcategory,
       isDeleted: false,
     });
 
@@ -30,13 +37,28 @@ export const createTax = async (req, res, next) => {
     }
 
     const tax = await Tax.create({
-      productType: productType.trim(),
-      category: category.trim(),
-      subcategory: subcategory.trim(),
+      productType,
+      category,
+      subcategory,
       cgst,
       sgst,
       createdBy: req.admin?._id,
     });
+
+    await tax.populate([
+      {
+        path: 'productType',
+        select: 'name',
+      },
+      {
+        path: 'category',
+        select: 'name',
+      },
+      {
+        path: 'subcategory',
+        select: 'name',
+      },
+    ]);
 
     return res.status(201).json(
       successResponse({
@@ -67,49 +89,90 @@ export const getAllTaxes = async (req, res, next) => {
       isDeleted: false,
     };
 
-    // PRODUCT TYPE FILTER
+    // EXACT PRODUCT TYPE FILTER
     if (productType) {
-      filter.productType = {
-        $regex: productType.trim(),
-        $options: 'i',
-      };
+      if (!mongoose.Types.ObjectId.isValid(productType)) {
+        return next(
+          new Error('Invalid productType ObjectId')
+        );
+      }
+
+      filter.productType = productType;
     }
 
-    // CATEGORY FILTER
+    // EXACT CATEGORY FILTER
     if (category) {
-      filter.category = {
-        $regex: category.trim(),
-        $options: 'i',
-      };
+      if (!mongoose.Types.ObjectId.isValid(category)) {
+        return next(
+          new Error('Invalid category ObjectId')
+        );
+      }
+
+      filter.category = category;
     }
 
-    // SUBCATEGORY FILTER
+    // EXACT SUBCATEGORY FILTER
     if (subcategory) {
-      filter.subcategory = {
-        $regex: subcategory.trim(),
-        $options: 'i',
-      };
+      if (!mongoose.Types.ObjectId.isValid(subcategory)) {
+        return next(
+          new Error('Invalid subcategory ObjectId')
+        );
+      }
+
+      filter.subcategory = subcategory;
     }
 
-    // SEARCH
+    // TEXT SEARCH
     if (search) {
+      const searchRegex = {
+        $regex: search.trim(),
+        $options: 'i',
+      };
+
+      const [
+        productTypes,
+        categories,
+        subcategories,
+      ] = await Promise.all([
+        ProductType.find({
+          name: searchRegex,
+        }).select('_id'),
+
+        Category.find({
+          name: searchRegex,
+        }).select('_id'),
+
+        Subcategory.find({
+          name: searchRegex,
+        }).select('_id'),
+      ]);
+
+      const productTypeIds = productTypes.map(
+        (item) => item._id
+      );
+
+      const categoryIds = categories.map(
+        (item) => item._id
+      );
+
+      const subcategoryIds = subcategories.map(
+        (item) => item._id
+      );
+
       filter.$or = [
         {
           productType: {
-            $regex: search.trim(),
-            $options: 'i',
+            $in: productTypeIds,
           },
         },
         {
           category: {
-            $regex: search.trim(),
-            $options: 'i',
+            $in: categoryIds,
           },
         },
         {
           subcategory: {
-            $regex: search.trim(),
-            $options: 'i',
+            $in: subcategoryIds,
           },
         },
       ];
@@ -124,6 +187,9 @@ export const getAllTaxes = async (req, res, next) => {
     });
 
     const taxes = await Tax.find(filter)
+      .populate('productType', 'name')
+      .populate('category', 'name')
+      .populate('subcategory', 'name')
       .populate('createdBy', 'name email role')
       .sort({ createdAt: -1 })
       .skip(pagination.skip)
@@ -151,7 +217,11 @@ export const getTaxById = async (req, res, next) => {
     const tax = await Tax.findOne({
       _id: id,
       isDeleted: false,
-    }).populate('createdBy', 'name email role');
+    })
+      .populate('productType', 'name')
+      .populate('category', 'name')
+      .populate('subcategory', 'name')
+      .populate('createdBy', 'name email role');
 
     if (!tax) {
       return next(notFound('Tax not found'));
@@ -193,9 +263,9 @@ export const updateTax = async (req, res, next) => {
     }
 
     const duplicate = await Tax.findOne({
-      productType: productType.trim(),
-      category: category.trim(),
-      subcategory: subcategory.trim(),
+      productType,
+      category,
+      subcategory,
       _id: { $ne: id },
       isDeleted: false,
     });
@@ -208,13 +278,28 @@ export const updateTax = async (req, res, next) => {
       );
     }
 
-    tax.productType = productType.trim();
-    tax.category = category.trim();
-    tax.subcategory = subcategory.trim();
+    tax.productType = productType;
+    tax.category = category;
+    tax.subcategory = subcategory;
     tax.cgst = cgst;
     tax.sgst = sgst;
 
     await tax.save();
+
+    await tax.populate([
+      {
+        path: 'productType',
+        select: 'name',
+      },
+      {
+        path: 'category',
+        select: 'name',
+      },
+      {
+        path: 'subcategory',
+        select: 'name',
+      },
+    ]);
 
     return res.status(200).json(
       successResponse({

@@ -6,7 +6,7 @@ import {
   getTaxById,
   updateTax,
   deleteTax,
-} from '../../../controllers/admin/product-management/tax.controller.js';
+} from '../../../controllers/admin/offers-tax-management/tax.controller.js';
 
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
@@ -14,7 +14,7 @@ import validate from '../../../middlewares/validate.middleware.js';
 import {
   createTaxSchema,
   updateTaxSchema,
-} from '../../../validations/product-management/tax.validation.js';
+} from '../../../validations/offers-tax-management/tax.validation.js';
 
 const router = Router();
 

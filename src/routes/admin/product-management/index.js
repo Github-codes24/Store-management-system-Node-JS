@@ -6,7 +6,7 @@ import subcategoryRoutes from './subcategory.routes.js';
 import brandRoutes from './brand.routes.js';
 import unitRoutes from './unit.routes.js';
 import attributeRoutes from './attribute.routes.js';
-import taxRoutes from './tax.routes.js';
+import taxRoutes from '../offers-tax-management/tax.routes.js';
 
 const router = Router();
 

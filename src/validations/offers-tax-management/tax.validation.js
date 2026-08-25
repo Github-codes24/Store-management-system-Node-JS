@@ -1,20 +1,15 @@
 import { z } from 'zod';
 
+const objectId = z
+  .string()
+  .regex(/^[0-9a-fA-F]{24}$/, 'Invalid ObjectId');
+
 export const createTaxSchema = z.object({
-  productType: z
-    .string({ required_error: 'Product type is required' })
-    .trim()
-    .min(1, 'Product type is required'),
+  productType: objectId,
 
-  category: z
-    .string({ required_error: 'Category is required' })
-    .trim()
-    .min(1, 'Category is required'),
+  category: objectId,
 
-  subcategory: z
-    .string({ required_error: 'Subcategory is required' })
-    .trim()
-    .min(1, 'Subcategory is required'),
+  subcategory: objectId,
 
   cgst: z
     .number({
@@ -34,20 +29,11 @@ export const createTaxSchema = z.object({
 });
 
 export const updateTaxSchema = z.object({
-  productType: z
-    .string()
-    .trim()
-    .min(1, 'Product type is required'),
+  productType: objectId,
 
-  category: z
-    .string()
-    .trim()
-    .min(1, 'Category is required'),
+  category: objectId,
 
-  subcategory: z
-    .string()
-    .trim()
-    .min(1, 'Subcategory is required'),
+  subcategory: objectId,
 
   cgst: z
     .number()

@@ -3,21 +3,21 @@ import mongoose from 'mongoose';
 const taxSchema = new mongoose.Schema(
   {
     productType: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductType',
       required: true,
-      trim: true,
     },
 
     category: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
       required: true,
-      trim: true,
     },
 
     subcategory: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Subcategory',
       required: true,
-      trim: true,
     },
 
     cgst: {
