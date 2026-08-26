@@ -152,7 +152,7 @@ export const forgotPassword = async (req, res, next) => {
     return res.status(200).json(
       successResponse({
         message: 'OTP sent to your registered email address',
-        data: { email: admin.email },
+        data: { email: admin.email, otp },
       })
     );
   } catch (error) {

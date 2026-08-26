@@ -137,10 +137,12 @@ describe('Admin Auth API Integration Tests', () => {
 
       expect(forgotRes.status).toBe(200);
       expect(forgotRes.body.success).toBe(true);
+      expect(forgotRes.body.data.otp).toBeDefined();
 
       // Inspect DB for OTP
       const dbAdmin = await Admin.findOne({ email: adminCredentials.email }).select('+resetOtp');
       expect(dbAdmin.resetOtp).toBeDefined();
+      expect(forgotRes.body.data.otp).toBe(dbAdmin.resetOtp);
       const otp = dbAdmin.resetOtp;
 
       // 2. Verify OTP
