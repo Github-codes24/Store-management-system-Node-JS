@@ -7,6 +7,7 @@ import storeEmployeeRouter from './storeEmployee.route.js';
 import userManagementRoutes from './user-management/index.js';
 import adminProductRoutes from './adminProduct.routes.js';
 import productPurchaseRoutes from './productPurchase.routes.js';
+import settingsRouter from './settings.routes.js';
 
 const router = Router();
 
@@ -33,6 +34,9 @@ router.use('/stores', storeRouter);
 
 // Store Employee Routes
 router.use('/store-employees', storeEmployeeRouter);
+
+// System Settings Routes
+router.use('/settings', settingsRouter);
 
 export default router;
 
