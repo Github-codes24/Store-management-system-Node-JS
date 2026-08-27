@@ -2,9 +2,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 
-// Load default .env file
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
-
 // Load environment-specific file if it exists (e.g., .env.development or .env.production)
 const envFile =
   process.env.NODE_ENV === 'production'
@@ -13,8 +10,11 @@ const envFile =
 
 const envFilePath = path.resolve(process.cwd(), envFile);
 if (fs.existsSync(envFilePath)) {
-  dotenv.config({ path: envFilePath, override: true });
+  dotenv.config({ path: envFilePath });
 }
+
+// Load default .env file (takes precedence and overrides environment defaults)
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 
 
 const required = (key, fallback) => {
@@ -32,7 +32,7 @@ const env = {
   PORT: Number(process.env.PORT) || 4000,
 
   // DB
-  MONGO_URI: required('MONGO_URI', 'mongodb://localhost:27017/store_management_db'),
+  MONGO_URI:  process.env.MONGO_URI || required('MONGO_URI', 'mongodb://localhost:27017/store_management_db'),
 
   // Auth Secrets
   ADMIN_JWT_SECRET: required('ADMIN_JWT_SECRET', isDev ? 'dev-secret-key-change-in-prod' : null),

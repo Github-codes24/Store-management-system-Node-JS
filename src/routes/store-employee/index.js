@@ -1,9 +1,14 @@
 import { Router } from 'express';
+import storeEmployeeAuthRouter from './storeEmployeeAuthRoutes.route.js';
+import adminAuthMiddleware from '../../middlewares/admin.auth.middleware.js';
+
 
 const router = Router();
 
-// Store Employee routes will be added here
-// Example: router.use('/auth', storeEmployeeAuthRoutes);
-// Example: router.use('/profile', storeEmployeeProfileRoutes);
+
+
+// Store Employee routes
+router.use('/auth', storeEmployeeAuthRouter);
 
 export default router;
+

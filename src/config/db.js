@@ -9,7 +9,7 @@ const connectDB = async () => {
       console.log('MongoDB already connected');
       return;
     }
-
+   console.log("env", env.MONGO_URI)
     const conn = await mongoose.connect(env.MONGO_URI, {
       autoIndex: true,
       serverSelectionTimeoutMS: 5000,
