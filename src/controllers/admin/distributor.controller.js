@@ -165,3 +165,22 @@ export const deleteDistributor = async (req, res) => {
     })
   );
 };
+
+export const getDistributorDropdown = async (req, res) => {
+  const distributors = await Distributor.find({ isDeleted: false, status: 'active' })
+    .select('name _id')
+    .sort({ name: 1 });
+
+  const dropdownData = distributors.map((d) => ({
+    label: d.name,
+    value: d._id,
+  }));
+
+  return res.status(200).json(
+    successResponse({
+      message: 'Distributor dropdown options fetched successfully',
+      data: dropdownData,
+    })
+  );
+};
+

@@ -25,6 +25,7 @@ const purchaseItemSchema = z.object({
   manufactureDate: z.string().optional().nullable(),
   expiryDate: z.string().optional().nullable(),
   hsnCode: z.string().trim().optional().nullable().or(z.literal('')),
+  productImage: z.string().optional().nullable(),
 });
 
 const initialPaymentSchema = z.object({
@@ -39,10 +40,7 @@ const initialPaymentSchema = z.object({
 
 export const createProductPurchaseSchema = {
   body: z.object({
-    purchaseId: z
-      .string({ required_error: 'Purchase ID is required' })
-      .trim()
-      .min(1, 'Purchase ID is required'),
+    purchaseId: z.string().trim().optional().nullable().or(z.literal('')),
     billDate: z.string().optional(),
     distributor: z
       .string({ required_error: 'Distributor is required' })

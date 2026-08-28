@@ -3,6 +3,7 @@ import {
   createSubcategory,
   getSubcategories,
   getSubcategoryById,
+  getSubcategoryDropdown,
   updateSubcategory,
   toggleSubcategoryStatus,
   deleteSubcategory,
@@ -21,6 +22,8 @@ const router = Router();
 
 router.use(adminAuth);
 
+router.get('/dropdown', getSubcategoryDropdown);
+
 router
   .route('/')
   .post(upload.single('image'), parseForm, validate(createSubcategorySchema), createSubcategory)
@@ -35,3 +38,4 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleSubcategoryStatus);
 
 export default router;
+

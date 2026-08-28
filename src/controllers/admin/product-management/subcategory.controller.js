@@ -32,7 +32,7 @@ export const createSubcategory = async (req, res, next) => {
       return next(conflict('Subcategory with this name already exists for the selected Category'));
     }
 
-    const image = processUploadedFile(req.file, req.body.image);
+    const image = await processUploadedFile(req.file, req.body.image, req);
 
     const subcategory = await Subcategory.create({
       name: name.trim(),
@@ -172,7 +172,7 @@ export const updateSubcategory = async (req, res, next) => {
     if (description !== undefined) subcategory.description = description;
     if (status !== undefined) subcategory.status = status;
 
-    const newImage = processUploadedFile(req.file, req.body.image);
+    const newImage = await processUploadedFile(req.file, req.body.image, req);
     if (newImage) {
       subcategory.image = newImage;
     }
@@ -244,3 +244,36 @@ export const deleteSubcategory = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getSubcategoryDropdown = async (req, res, next) => {
+  try {
+    const { category, productType } = req.query;
+    const filter = { status: 'active' };
+
+    if (category) {
+      filter.category = category;
+    }
+    if (productType) {
+      filter.productType = productType;
+    }
+
+    const subcategories = await Subcategory.find(filter)
+      .select('name _id category productType')
+      .sort({ name: 1 });
+
+    const dropdownData = subcategories.map((sub) => ({
+      label: sub.name,
+      value: sub._id,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Subcategory dropdown options fetched successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+

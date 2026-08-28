@@ -3,6 +3,7 @@ import {
   createUnit,
   getUnits,
   getUnitById,
+  getUnitDropdown,
   updateUnit,
   toggleUnitStatus,
   deleteUnit,
@@ -20,6 +21,8 @@ const router = Router();
 
 router.use(adminAuth);
 
+router.get('/dropdown', getUnitDropdown);
+
 router
   .route('/')
   .post(parseForm, validate(createUnitSchema), createUnit)
@@ -34,3 +37,4 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleUnitStatus);
 
 export default router;
+

@@ -3,6 +3,7 @@ import {
   createBrand,
   getBrands,
   getBrandById,
+  getBrandDropdown,
   updateBrand,
   toggleBrandStatus,
   deleteBrand,
@@ -21,6 +22,8 @@ const router = Router();
 
 router.use(adminAuth);
 
+router.get('/dropdown', getBrandDropdown);
+
 router
   .route('/')
   .post(upload.single('logo'), parseForm, validate(createBrandSchema), createBrand)
@@ -35,3 +38,4 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleBrandStatus);
 
 export default router;
+

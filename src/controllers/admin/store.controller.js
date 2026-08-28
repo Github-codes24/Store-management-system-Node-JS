@@ -160,12 +160,19 @@ export const deleteStore = async (req, res) => {
 
 export const getStoresDropdown = async (_req, res) => {
   const stores = await Store.find({ isDeleted: false })
-    .select('_id name storeCode')
+    .select('_id name storeCode mobile email location')
     .sort({ name: 1 });
 
   const dropdownOptions = stores.map((store) => ({
     label: store.name,
     value: store._id.toString(),
+    _id: store._id.toString(),
+    id: store._id.toString(),
+    name: store.name,
+    storeCode: store.storeCode,
+    mobile: store.mobile,
+    email: store.email,
+    location: store.location,
   }));
 
   return res.status(200).json(

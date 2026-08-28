@@ -7,12 +7,20 @@ import storeEmployeeRouter from './storeEmployee.route.js';
 import userManagementRoutes from './user-management/index.js';
 import adminProductRoutes from './adminProduct.routes.js';
 import productPurchaseRoutes from './productPurchase.routes.js';
+import productStockRoutes from './productStock.routes.js';
+import sellProductRoutes from './sellProduct.routes.js';
+import retailerRouter from './retailer.route.js';
 import settingsRouter from './settings.routes.js';
+import uploadRoutes from './upload.routes.js';
 
 const router = Router();
 
 // Admin Auth Routes
 router.use('/auth', adminAuthRoutes);
+
+// Image & File Upload / Delete Routes
+router.use('/upload', uploadRoutes);
+router.use('/media', uploadRoutes);
 
 // Product Management Master Routes
 router.use('/product-management', productManagementRoutes);
@@ -20,14 +28,23 @@ router.use('/product-management', productManagementRoutes);
 // Admin Product Master Catalog Routes
 router.use('/products', adminProductRoutes);
 
+// Product Stock Warehouse Management Routes
+router.use('/product-stocks', productStockRoutes);
+
 // Product Purchase Invoice & Payment Routes
 router.use('/product-purchases', productPurchaseRoutes);
+
+// Sell Product Invoice & Payment Routes
+router.use('/sell-products', sellProductRoutes);
 
 // User Management Routes
 router.use('/user-management', userManagementRoutes);
 
 // Distributor Routes
 router.use('/distributors', distributorRouter);
+
+// Retailer Routes
+router.use('/retailers', retailerRouter);
 
 // Store Routes
 router.use('/stores', storeRouter);
@@ -39,6 +56,7 @@ router.use('/store-employees', storeEmployeeRouter);
 router.use('/settings', settingsRouter);
 
 export default router;
+
 
 
 

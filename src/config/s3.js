@@ -1,24 +1,21 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import env from './env.js';
 
-let s3;
-
 const initS3 = () => {
-  if (!s3) {
-    s3 = new S3Client({
-      region: env.S3_REGION,
-      endpoint: env.S3_ENDPOINT || undefined,
-      credentials: {
-        accessKeyId: env.S3_ACCESS_KEY,
-        secretAccessKey: env.S3_SECRET_KEY,
-      },
-      forcePathStyle: true,
-    });
+  const s3Config = {
+    region: env.S3_REGION || 'ap-south-1',
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY,
+      secretAccessKey: env.S3_SECRET_KEY,
+    },
+  };
 
-    console.log('✅ S3 Client initialized');
+  if (env.S3_ENDPOINT && env.S3_ENDPOINT.trim() !== '') {
+    s3Config.endpoint = env.S3_ENDPOINT.trim();
+    s3Config.forcePathStyle = true;
   }
 
-  return s3;
+  return new S3Client(s3Config);
 };
 
 export default initS3;

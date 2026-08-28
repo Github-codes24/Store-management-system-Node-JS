@@ -166,3 +166,27 @@ export const deleteUnit = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getUnitDropdown = async (req, res, next) => {
+  try {
+    const units = await Unit.find({ status: 'active' })
+      .select('name shortName _id')
+      .sort({ name: 1 });
+
+    const dropdownData = units.map((u) => ({
+      label: u.shortName ? `${u.name} (${u.shortName})` : u.name,
+      value: u._id,
+      shortName: u.shortName,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Unit dropdown options fetched successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
