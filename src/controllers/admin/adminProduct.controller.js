@@ -8,23 +8,23 @@ import { processUploadedFile } from '../../utils/file-upload.js';
 export const createAdminProduct = async (req, res) => {
   let { barcode, productImage, ...productData } = req.body;
 
-  if (barcode && barcode.trim() !== '') {
+  let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
+  if (finalBarcode !== '') {
     const existing = await AdminProduct.findOne({
-      barcode: barcode.trim(),
+      barcode: finalBarcode,
       isDeleted: false,
     });
 
     if (existing) {
       throw conflict('An active product with this barcode already exists');
     }
-    barcode = barcode.trim();
   } else {
     // Auto-generate barcode if not provided
     let isUnique = false;
     let attempts = 0;
     while (!isUnique && attempts < 10) {
-      barcode = generateBarcode();
-      const existing = await AdminProduct.findOne({ barcode, isDeleted: false });
+      finalBarcode = generateBarcode();
+      const existing = await AdminProduct.findOne({ barcode: finalBarcode, isDeleted: false });
       if (!existing) {
         isUnique = true;
       }
@@ -39,7 +39,8 @@ export const createAdminProduct = async (req, res) => {
 
   const product = await AdminProduct.create({
     ...productData,
-    barcode,
+    productName: productData.productName ? String(productData.productName).trim() : '',
+    barcode: finalBarcode,
     productImage: imageUrl,
   });
 

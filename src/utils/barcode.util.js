@@ -1,8 +1,57 @@
 import PDFDocument from 'pdfkit';
 
 /**
+ * Code 128 Character Patterns (Indices 0 to 102)
+ */
+const CODE128_PATTERNS = [
+  "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
+  "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132",
+  "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211",
+  "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+  "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331",
+  "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111",
+  "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214",
+  "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+  "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+  "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311", "113141",
+  "114131", "311141", "411131"
+];
+
+/**
+ * Returns a 0/1 binary bit sequence for Code 128-B encoding
+ * @param {string} text 
+ * @returns {string} Bit string of 1s (bars) and 0s (spaces)
+ */
+export const getCode128BitString = (text) => {
+  const safeText = String(text || '1234567890123').trim();
+  const startCodeB = 104;
+
+  const values = [startCodeB];
+  let checkSum = startCodeB;
+  for (let i = 0; i < safeText.length; i++) {
+    const code = safeText.charCodeAt(i) - 32;
+    const val = code >= 0 && code <= 95 ? code : 0;
+    values.push(val);
+    checkSum += val * (i + 1);
+  }
+  const checkDigit = checkSum % 103;
+  values.push(checkDigit);
+
+  const fullPatterns = [...CODE128_PATTERNS, "211412", "211214", "211232", "2331112"];
+  let sequence = "";
+  for (const val of values) {
+    const pat = fullPatterns[val] || "121212";
+    for (let p = 0; p < pat.length; p++) {
+      const count = parseInt(pat[p], 10);
+      sequence += (p % 2 === 0 ? "1" : "0").repeat(count);
+    }
+  }
+  sequence += "1100011101011"; // Stop sequence
+  return sequence;
+};
+
+/**
  * Generates a standard 13-digit EAN-style barcode number string
- * Example: 890 + 9 random/timestamp digits + check digit
  */
 export const generateBarcode = () => {
   const prefix = '890';
@@ -24,8 +73,6 @@ export const generateBarcode = () => {
 
 /**
  * Validates basic barcode string format
- * @param {string} barcode
- * @returns {boolean}
  */
 export const isValidBarcode = (barcode) => {
   if (typeof barcode !== 'string') return false;
@@ -34,38 +81,48 @@ export const isValidBarcode = (barcode) => {
 };
 
 /**
- * Generates an SVG representation string of barcode bars for rendering in UI or PDFs
+ * Generates full-length SVG representation string of barcode bars
  * @param {string} barcodeStr 
  * @returns {string} SVG string
  */
 export const generateBarcodeSvg = (barcodeStr) => {
-  const code = (barcodeStr || '1234567890123').toString();
+  const code = (barcodeStr || '1234567890123').toString().trim();
+  const bitSequence = getCode128BitString(code);
   const width = 200;
   const height = 50;
 
+  const unitW = width / bitSequence.length;
   let barsHtml = '';
-  let x = 10;
-  for (let i = 0; i < code.length; i++) {
-    const charCode = code.charCodeAt(i);
-    const barWidth = (charCode % 3) + 1;
-    const isBar = i % 2 === 0;
-    if (isBar) {
-      barsHtml += `<rect x="${x}" y="5" width="${barWidth}" height="${height - 15}" fill="#000000" />`;
+  let inBar = false;
+  let startIdx = 0;
+
+  for (let i = 0; i <= bitSequence.length; i++) {
+    const char = bitSequence[i];
+    if (char === '1') {
+      if (!inBar) {
+        inBar = true;
+        startIdx = i;
+      }
+    } else {
+      if (inBar) {
+        const barW = (i - startIdx) * unitW;
+        barsHtml += `<rect x="${(startIdx * unitW).toFixed(2)}" y="5" width="${barW.toFixed(2)}" height="${height - 18}" fill="#000000" />`;
+        inBar = false;
+      }
     }
-    x += barWidth + (i % 2 === 0 ? 1 : 2);
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <rect width="100%" height="100%" fill="#ffffff"/>
     ${barsHtml}
-    <text x="${width / 2}" y="${height - 2}" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#000000">${code}</text>
+    <text x="${width / 2}" y="${height - 2}" font-family="Arial, sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5" text-anchor="middle" fill="#000000">${code}</text>
   </svg>`;
 };
 
 /**
- * Generates a PDF buffer containing printable barcode labels for a product
+ * Generates a PDF buffer containing printable barcode labels with full-width, scannable bars
  * @param {Object} product - Product details (productName, barcode, mrp, onlineSellingPrice)
- * @param {number} quantity - Number of barcode labels to generate (e.g. 100)
+ * @param {number} quantity - Number of barcode labels to generate
  * @returns {Promise<Buffer>} PDF Buffer
  */
 export const generateBarcodePdfBuffer = async (product, quantity = 1) => {
@@ -77,22 +134,24 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1) => {
     doc.on('end', () => resolve(Buffer.concat(buffers)));
     doc.on('error', (err) => reject(err));
 
-    const labelWidth = 160;
-    const labelHeight = 85;
+    const labelWidth = 165;
+    const labelHeight = 90;
     const cols = 3;
-    const startX = 30;
-    const startY = 30;
-    const gapX = 20;
-    const gapY = 20;
+    const startX = 28;
+    const startY = 28;
+    const gapX = 18;
+    const gapY = 18;
 
     const printableCount = Math.max(1, parseInt(quantity, 10) || 1);
+    const barcodeStr = String(product.barcode || '8900000000000').trim();
+    const bitSequence = getCode128BitString(barcodeStr);
 
     for (let i = 0; i < printableCount; i++) {
-      if (i > 0 && i % 24 === 0) {
+      if (i > 0 && i % 21 === 0) {
         doc.addPage();
       }
 
-      const pageIndex = i % 24;
+      const pageIndex = i % 21;
       const row = Math.floor(pageIndex / cols);
       const col = pageIndex % cols;
 
@@ -100,57 +159,72 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1) => {
       const y = startY + row * (labelHeight + gapY);
 
       // Label border
-      doc.roundedRect(x, y, labelWidth, labelHeight, 4).stroke('#cccccc');
+      doc.roundedRect(x, y, labelWidth, labelHeight, 5).lineWidth(1).stroke('#000000');
 
-      // Product Name
+      // Product Name (Bold)
       doc
         .font('Helvetica-Bold')
-        .fontSize(9)
+        .fontSize(9.5)
         .fillColor('#000000')
-        .text((product.productName || 'Product').substring(0, 24), x + 5, y + 6, {
-          width: labelWidth - 10,
+        .text((product.productName || 'Product').substring(0, 26), x + 6, y + 8, {
+          width: labelWidth - 12,
           align: 'center',
           ellipsis: true,
         });
 
       // Price display
-      const priceText = product.onlineSellingPrice
-        ? `MRP: ₹${product.mrp || product.onlineSellingPrice} | Price: ₹${product.onlineSellingPrice}`
-        : `MRP: ₹${product.mrp || 0}`;
-      
+      const mrpNum = Number(product.mrp || 0);
+      const sellNum = Number(product.offlineSellingPrice || product.onlineSellingPrice || 0);
+      let priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')}`;
+      if (sellNum > 0 && sellNum !== mrpNum) {
+        priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')} | Price: Rs. ${sellNum.toLocaleString('en-IN')}`;
+      }
+
       doc
-        .font('Helvetica')
-        .fontSize(7)
-        .fillColor('#333333')
-        .text(priceText, x + 5, y + 18, {
-          width: labelWidth - 10,
+        .font('Helvetica-Bold')
+        .fontSize(7.5)
+        .fillColor('#222222')
+        .text(priceText, x + 6, y + 21, {
+          width: labelWidth - 12,
           align: 'center',
         });
 
-      // Barcode bars representation
-      const barcodeStr = product.barcode || '8900000000000';
-      const barStartY = y + 28;
-      let barX = x + 15;
-      const barHeight = 28;
+      // Full-length Barcode bars
+      const availableBarcodeWidth = labelWidth - 20; // 145px width across the label
+      const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+      const barStartX = x + 10;
+      const barStartY = y + 33;
+      const barHeight = 32;
 
       doc.fillColor('#000000');
-      for (let b = 0; b < barcodeStr.length; b++) {
-        const charCode = barcodeStr.charCodeAt(b);
-        const w = (charCode % 2) + 1;
-        if (b % 2 === 0) {
-          doc.rect(barX, barStartY, w, barHeight).fill('#000000');
+      let inBar = false;
+      let startIdx = 0;
+
+      for (let s = 0; s <= bitSequence.length; s++) {
+        if (bitSequence[s] === '1') {
+          if (!inBar) {
+            inBar = true;
+            startIdx = s;
+          }
+        } else {
+          if (inBar) {
+            const barW = (s - startIdx) * unitBarWidth;
+            const barX = barStartX + startIdx * unitBarWidth;
+            doc.rect(barX, barStartY, barW, barHeight).fill('#000000');
+            inBar = false;
+          }
         }
-        barX += w + 1;
       }
 
-      // Barcode numeric string below bars
+      // Barcode numeric string centered below bars
       doc
-        .font('Helvetica')
-        .fontSize(8)
+        .font('Helvetica-Bold')
+        .fontSize(8.5)
         .fillColor('#000000')
-        .text(barcodeStr, x + 5, y + 60, {
-          width: labelWidth - 10,
+        .text(barcodeStr, x + 6, y + 70, {
+          width: labelWidth - 12,
           align: 'center',
+          characterSpacing: 1.5,
         });
     }
 
