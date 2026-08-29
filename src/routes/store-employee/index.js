@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import storeEmployeeAuthRoutes from './storeEmployee.auth.route.js';
 import storeEmployeeProfileRoutes from './storeEmployee.profile.route.js';
+import storeProductRoutes from './storeProduct.routes.js';
 import storeCustomerRoutes from './storeCustomer.route.js';
 
 const router = Router();
@@ -10,6 +11,9 @@ router.use('/auth', storeEmployeeAuthRoutes);
 
 // Store Employee Profile Routes (/api/store-employee/profile)
 router.use('/profile', storeEmployeeProfileRoutes);
+
+// Store Employee Product Inventory Routes (/api/store-employee/products)
+router.use('/products', storeProductRoutes);
 
 // Store Customer Routes (/api/store-employee/customers)
 router.use('/customers', storeCustomerRoutes);
