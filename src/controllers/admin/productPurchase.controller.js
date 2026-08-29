@@ -29,13 +29,32 @@ export const createProductPurchase = async (req, res) => {
     throw notFound('Distributor not found');
   }
 
-  // 2. Check if purchaseId already exists
-  const existingPurchase = await ProductPurchaseInvoice.findOne({
-    purchaseId: purchaseId.trim(),
-    isDeleted: false,
-  });
-  if (existingPurchase) {
-    throw conflict(`Purchase ID '${purchaseId}' is already used for an active purchase invoice`);
+  // 2. Auto-generate or verify purchaseId
+  let finalPurchaseId = purchaseId && typeof purchaseId === 'string' ? purchaseId.trim() : '';
+
+  if (!finalPurchaseId) {
+    let isUnique = false;
+    let attempts = 0;
+    while (!isUnique && attempts < 10) {
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const randomPart = Math.floor(1000 + Math.random() * 9000);
+      finalPurchaseId = `PUR-${dateStr}-${randomPart}`;
+
+      const existing = await ProductPurchaseInvoice.findOne({
+        purchaseId: finalPurchaseId,
+        isDeleted: false,
+      });
+      if (!existing) isUnique = true;
+      attempts++;
+    }
+  } else {
+    const existingPurchase = await ProductPurchaseInvoice.findOne({
+      purchaseId: finalPurchaseId,
+      isDeleted: false,
+    });
+    if (existingPurchase) {
+      throw conflict(`Purchase ID '${finalPurchaseId}' is already used for an active purchase invoice`);
+    }
   }
 
   // 3. Process line items & update/create products
@@ -110,6 +129,7 @@ export const createProductPurchase = async (req, res) => {
         manufactureDate: item.manufactureDate ? new Date(item.manufactureDate) : null,
         expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
         hsnCode: item.hsnCode || null,
+        productImage: item.productImage || null,
       });
     }
 
@@ -155,7 +175,7 @@ export const createProductPurchase = async (req, res) => {
 
   // 5. Create Purchase Invoice Document
   const invoice = await ProductPurchaseInvoice.create({
-    purchaseId: purchaseId.trim(),
+    purchaseId: finalPurchaseId,
     billDate: billDate ? new Date(billDate) : new Date(),
     distributor: distributorId,
     items: processedItems,

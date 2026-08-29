@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
+import path from 'path';
 import { apiLimiter } from './middlewares/rate-limit.middleware.js';
 import apiRouter from './routes/index.js';
 import errorMiddleware from './middlewares/error.middleware.js';
@@ -17,7 +18,7 @@ app.use(
     crossOriginResourcePolicy: false,
   })
 );
- 
+
 // CORS
 app.use(
   cors({
@@ -26,9 +27,9 @@ app.use(
   })
 );
 
-// Body parsers
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsers (expanded limit for base64 image payloads)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Cookie parser
 app.use(cookieParser());
@@ -42,10 +43,14 @@ app.use(compression());
 // Rate limiting
 app.use(apiLimiter);
 
+// Serve static uploaded files
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+
 // Health check
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'store-management-be' });
 });
+
 
 // API routes
 app.use('/api', apiRouter);

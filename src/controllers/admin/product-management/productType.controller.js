@@ -14,7 +14,7 @@ export const createProductType = async (req, res, next) => {
       return next(conflict('Product Type with this name already exists'));
     }
 
-    const image = processUploadedFile(req.file, req.body.image);
+    const image = await processUploadedFile(req.file, req.body.image, req);
 
     const productType = await ProductType.create({
       name: name.trim(),
@@ -109,7 +109,7 @@ export const updateProductType = async (req, res, next) => {
     if (description !== undefined) productType.description = description;
     if (status !== undefined) productType.status = status;
 
-    const newImage = processUploadedFile(req.file, req.body.image);
+    const newImage = await processUploadedFile(req.file, req.body.image, req);
     if (newImage) {
       productType.image = newImage;
     }
@@ -181,3 +181,26 @@ export const deleteProductType = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getProductTypeDropdown = async (req, res, next) => {
+  try {
+    const productTypes = await ProductType.find({ status: 'active' })
+      .select('name _id')
+      .sort({ name: 1 });
+
+    const dropdownData = productTypes.map((pt) => ({
+      label: pt.name,
+      value: pt._id,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Product Type dropdown options fetched successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+

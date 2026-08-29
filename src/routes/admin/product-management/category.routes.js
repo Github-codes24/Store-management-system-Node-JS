@@ -3,6 +3,7 @@ import {
   createCategory,
   getCategories,
   getCategoryById,
+  getCategoryDropdown,
   updateCategory,
   toggleCategoryStatus,
   deleteCategory,
@@ -21,6 +22,8 @@ const router = Router();
 
 router.use(adminAuth);
 
+router.get('/dropdown', getCategoryDropdown);
+
 router
   .route('/')
   .post(upload.single('image'), parseForm, validate(createCategorySchema), createCategory)
@@ -35,3 +38,4 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleCategoryStatus);
 
 export default router;
+

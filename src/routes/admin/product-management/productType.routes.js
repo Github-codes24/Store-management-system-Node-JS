@@ -3,6 +3,7 @@ import {
   createProductType,
   getProductTypes,
   getProductTypeById,
+  getProductTypeDropdown,
   updateProductType,
   toggleProductTypeStatus,
   deleteProductType,
@@ -21,6 +22,8 @@ const router = Router();
 
 router.use(adminAuth);
 
+router.get('/dropdown', getProductTypeDropdown);
+
 router
   .route('/')
   .post(upload.single('image'), parseForm, validate(createProductTypeSchema), createProductType)
@@ -35,3 +38,4 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleProductTypeStatus);
 
 export default router;
+

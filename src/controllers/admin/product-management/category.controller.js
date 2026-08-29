@@ -23,7 +23,7 @@ export const createCategory = async (req, res, next) => {
       return next(conflict('Category with this name already exists for the selected Product Type'));
     }
 
-    const image = processUploadedFile(req.file, req.body.image);
+    const image = await processUploadedFile(req.file, req.body.image, req);
 
     const category = await Category.create({
       name: name.trim(),
@@ -140,7 +140,7 @@ export const updateCategory = async (req, res, next) => {
     if (description !== undefined) category.description = description;
     if (status !== undefined) category.status = status;
 
-    const newImage = processUploadedFile(req.file, req.body.image);
+    const newImage = await processUploadedFile(req.file, req.body.image, req);
     if (newImage) {
       category.image = newImage;
     }
@@ -214,3 +214,33 @@ export const deleteCategory = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getCategoryDropdown = async (req, res, next) => {
+  try {
+    const { productType } = req.query;
+    const filter = { status: 'active' };
+
+    if (productType) {
+      filter.productType = productType;
+    }
+
+    const categories = await Category.find(filter)
+      .select('name _id productType')
+      .sort({ name: 1 });
+
+    const dropdownData = categories.map((cat) => ({
+      label: cat.name,
+      value: cat._id,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Category dropdown options fetched successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+

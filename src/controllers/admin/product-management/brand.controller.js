@@ -13,7 +13,7 @@ export const createBrand = async (req, res, next) => {
       return next(conflict('Brand with this name already exists'));
     }
 
-    const logo = processUploadedFile(req.file, req.body.logo);
+    const logo = await processUploadedFile(req.file, req.body.logo, req);
 
     const brand = await Brand.create({
       name: name.trim(),
@@ -108,7 +108,7 @@ export const updateBrand = async (req, res, next) => {
     if (description !== undefined) brand.description = description;
     if (status !== undefined) brand.status = status;
 
-    const newLogo = processUploadedFile(req.file, req.body.logo);
+    const newLogo = await processUploadedFile(req.file, req.body.logo, req);
     if (newLogo) {
       brand.logo = newLogo;
     }
@@ -170,3 +170,26 @@ export const deleteBrand = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getBrandDropdown = async (req, res, next) => {
+  try {
+    const brands = await Brand.find({ status: 'active' })
+      .select('name _id')
+      .sort({ name: 1 });
+
+    const dropdownData = brands.map((b) => ({
+      label: b.name,
+      value: b._id,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Brand dropdown options fetched successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -3,9 +3,10 @@ import { badRequest, conflict, notFound } from '../../utils/api-error.js';
 import { successResponse } from '../../utils/api-response.js';
 import { generateBarcode } from '../../utils/barcode.util.js';
 import { getPagination } from '../../utils/pagination.js';
+import { processUploadedFile } from '../../utils/file-upload.js';
 
 export const createAdminProduct = async (req, res) => {
-  let { barcode, ...productData } = req.body;
+  let { barcode, productImage, ...productData } = req.body;
 
   if (barcode && barcode.trim() !== '') {
     const existing = await AdminProduct.findOne({
@@ -34,9 +35,12 @@ export const createAdminProduct = async (req, res) => {
     }
   }
 
+  const imageUrl = await processUploadedFile(req.file, productImage, req);
+
   const product = await AdminProduct.create({
     ...productData,
     barcode,
+    productImage: imageUrl,
   });
 
   const populatedProduct = await AdminProduct.findById(product._id)
@@ -167,7 +171,7 @@ export const getAdminProductById = async (req, res) => {
 
 export const updateAdminProduct = async (req, res) => {
   const { id } = req.params;
-  const updateData = req.body;
+  const { productImage, ...updateData } = req.body;
 
   const product = await AdminProduct.findOne({ _id: id, isDeleted: false });
   if (!product) {
@@ -184,6 +188,11 @@ export const updateAdminProduct = async (req, res) => {
     if (existing) {
       throw conflict('An active product with this barcode already exists');
     }
+  }
+
+  const newImageUrl = await processUploadedFile(req.file, productImage, req);
+  if (newImageUrl) {
+    updateData.productImage = newImageUrl;
   }
 
   const updatedProduct = await AdminProduct.findByIdAndUpdate(
@@ -223,3 +232,31 @@ export const deleteAdminProduct = async (req, res) => {
     })
   );
 };
+
+export const getAdminProductDropdown = async (req, res) => {
+  const products = await AdminProduct.find({ isDeleted: false, status: 'active' })
+    .select('productName _id barcode purchasePrice mrp offlineSellingPrice onlineSellingPrice unit gstPercentage taxType')
+    .populate('unit', 'name shortName')
+    .sort({ productName: 1 });
+
+  const dropdownData = products.map((p) => ({
+    label: p.productName,
+    value: p._id,
+    barcode: p.barcode,
+    purchasePrice: p.purchasePrice,
+    mrp: p.mrp,
+    offlineSellingPrice: p.offlineSellingPrice,
+    onlineSellingPrice: p.onlineSellingPrice,
+    unit: p.unit,
+    gstPercentage: p.gstPercentage,
+    taxType: p.taxType,
+  }));
+
+  return res.status(200).json(
+    successResponse({
+      message: 'Admin product dropdown options fetched successfully',
+      data: dropdownData,
+    })
+  );
+};
+
