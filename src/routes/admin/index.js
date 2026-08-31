@@ -12,6 +12,7 @@ import sellProductRoutes from './sellProduct.routes.js';
 import retailerRouter from './retailer.route.js';
 import settingsRouter from './settings.routes.js';
 import uploadRoutes from './upload.routes.js';
+import offersAndTaxManagementRoutes from './offers-and-tax-management/index.js';
 
 const router = Router();
 
@@ -24,6 +25,9 @@ router.use('/media', uploadRoutes);
 
 // Product Management Master Routes
 router.use('/product-management', productManagementRoutes);
+
+// Offers & Tax Management Routes
+router.use('/offers-and-tax-management', offersAndTaxManagementRoutes);
 
 // Admin Product Master Catalog Routes
 router.use('/products', adminProductRoutes);
@@ -56,6 +60,7 @@ router.use('/store-employees', storeEmployeeRouter);
 router.use('/settings', settingsRouter);
 
 export default router;
+
 
 
 
