@@ -4,6 +4,7 @@ import {
   getSubcategories,
   getSubcategoryById,
   getSubcategoryDropdown,
+  getSubcategoriesByCategory,
   updateSubcategory,
   toggleSubcategoryStatus,
   deleteSubcategory,
@@ -23,6 +24,7 @@ const router = Router();
 router.use(adminAuth);
 
 router.get('/dropdown', getSubcategoryDropdown);
+router.get('/by-category/:categoryId', getSubcategoriesByCategory);
 
 router
   .route('/')
@@ -38,4 +40,3 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleSubcategoryStatus);
 
 export default router;
-

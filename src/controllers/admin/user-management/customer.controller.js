@@ -8,14 +8,18 @@ import { getPagination } from '../../../utils/pagination.js';
  */
 export const createCustomer = async (req, res, next) => {
   try {
-    const { name, email, phone, dateOfBirth, address, totalPurchase, amountDue, totalOrders, totalStoreVisits, status } = req.body;
+    const { name, email, phone, dateOfBirth, address, storeId, totalPurchase, amountDue, totalOrders, totalStoreVisits, status } = req.body;
 
-    const existing = await Customer.findOne({ phone: phone.trim() });
+    const checkFilter = { phone: phone.trim() };
+    if (storeId) checkFilter.storeId = storeId;
+
+    const existing = await Customer.findOne(checkFilter);
     if (existing) {
       return next(conflict('Customer with this mobile number already exists'));
     }
 
     const customer = await Customer.create({
+      storeId: storeId || null,
       name: name.trim(),
       email: email ? email.trim().toLowerCase() : '',
       phone: phone.trim(),
@@ -44,9 +48,13 @@ export const createCustomer = async (req, res, next) => {
  */
 export const getCustomers = async (req, res, next) => {
   try {
-    const { search, status, page = 1, limit = 10 } = req.query;
+    const { search, status, storeId, page = 1, limit = 10 } = req.query;
 
     const filter = {};
+
+    if (storeId) {
+      filter.storeId = storeId;
+    }
 
     if (search) {
       const regex = new RegExp(search.trim(), 'i');
@@ -61,6 +69,7 @@ export const getCustomers = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
 
     const customers = await Customer.find(filter)
+      .populate('storeId', 'name storeCode location')
       .sort({ createdAt: -1 })
       .skip(pagination.skip)
       .limit(pagination.limit);

@@ -277,3 +277,28 @@ export const getSubcategoryDropdown = async (req, res, next) => {
   }
 };
 
+export const getSubcategoriesByCategory = async (req, res, next) => {
+  try {
+    const { categoryId } = req.params;
+
+    const subcategories = await Subcategory.find({ category: categoryId, status: 'active' })
+      .select('name _id category productType')
+      .sort({ name: 1 });
+
+    const dropdownData = subcategories.map((sub) => ({
+      label: sub.name,
+      value: sub._id.toString(),
+      category: sub.category.toString(),
+      productType: sub.productType ? sub.productType.toString() : null,
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Subcategories fetched by Category successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};

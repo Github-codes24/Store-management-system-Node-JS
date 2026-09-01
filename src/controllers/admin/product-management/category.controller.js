@@ -244,3 +244,27 @@ export const getCategoryDropdown = async (req, res, next) => {
   }
 };
 
+export const getCategoriesByProductType = async (req, res, next) => {
+  try {
+    const { productTypeId } = req.params;
+
+    const categories = await Category.find({ productType: productTypeId, status: 'active' })
+      .select('name _id productType')
+      .sort({ name: 1 });
+
+    const dropdownData = categories.map((cat) => ({
+      label: cat.name,
+      value: cat._id.toString(),
+      productType: cat.productType.toString(),
+    }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Categories fetched by Product Type successfully',
+        data: dropdownData,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};

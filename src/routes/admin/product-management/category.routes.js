@@ -4,6 +4,7 @@ import {
   getCategories,
   getCategoryById,
   getCategoryDropdown,
+  getCategoriesByProductType,
   updateCategory,
   toggleCategoryStatus,
   deleteCategory,
@@ -23,6 +24,7 @@ const router = Router();
 router.use(adminAuth);
 
 router.get('/dropdown', getCategoryDropdown);
+router.get('/by-product-type/:productTypeId', getCategoriesByProductType);
 
 router
   .route('/')
@@ -38,4 +40,3 @@ router
 router.patch('/:id/status', validate(toggleStatusSchema), toggleCategoryStatus);
 
 export default router;
-
