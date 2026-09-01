@@ -1,44 +1,23 @@
-import Offer from '../../../models/offer.model.js';
-import Store from '../../../models/store.model.js';
-import Customer from '../../../models/customer.model.js';
-import AdminProduct from '../../../models/adminProduct.model.js';
-import Category from '../../../models/category.model.js';
-import { successResponse } from '../../../utils/api-response.js';
-import { notFound, badRequest } from '../../../utils/api-error.js';
-import { getPagination } from '../../../utils/pagination.js';
+import Offer from '../../models/offer.model.js';
+import Customer from '../../models/customer.model.js';
+import AdminProduct from '../../models/adminProduct.model.js';
+import Category from '../../models/category.model.js';
+import { successResponse } from '../../utils/api-response.js';
+import { notFound, badRequest } from '../../utils/api-error.js';
+import { getPagination } from '../../utils/pagination.js';
 
 /**
- * Get Pre-Requisite Options for Create/Edit Offer Form (Stores, Push Target Customers, Live DB Products & Categories)
- * Supports store-based customer filtering via ?storeId=... or ?storeIds=id1,id2
+ * Get Pre-Requisite Options for Store Panel Offer Form (Store-scoped Customers, Live Products & Categories)
  */
-export const getOfferFormOptions = async (req, res, next) => {
+export const getStoreOfferFormOptions = async (req, res, next) => {
   try {
-    const { storeId, storeIds } = req.query;
+    const employeeStoreId = req.storeEmployee?.storeId;
 
-    const stores = await Store.find({ isDeleted: false })
-      .select('_id name storeCode location')
-      .sort({ name: 1 });
-
-    const formattedStores = stores.map((s) => ({
-      label: s.name,
-      value: s._id.toString(),
-      storeCode: s.storeCode,
-    }));
-
+    // Fetch live customers registered at this employee's assigned store (or storeId null)
     const customerFilter = { status: 'active' };
-
-    // Filter customers by storeId or storeIds if provided
-    if (storeIds) {
-      const idList = Array.isArray(storeIds)
-        ? storeIds
-        : storeIds.split(',').map((id) => id.trim()).filter(Boolean);
+    if (employeeStoreId) {
       customerFilter.$or = [
-        { storeId: { $in: idList } },
-        { storeId: null },
-      ];
-    } else if (storeId) {
-      customerFilter.$or = [
-        { storeId: storeId },
+        { storeId: employeeStoreId },
         { storeId: null },
       ];
     }
@@ -56,12 +35,12 @@ export const getOfferFormOptions = async (req, res, next) => {
       amountDue: c.amountDue || 0,
     }));
 
-    // Fetch live products from AdminProduct collection
+    // Fetch live products
     const liveProducts = await AdminProduct.find({ isDeleted: false })
       .select('_id productName status')
       .sort({ productName: 1 });
 
-    // Fetch live categories from Category collection
+    // Fetch live categories
     const liveCategories = await Category.find({ status: 'active' })
       .select('_id name')
       .sort({ name: 1 });
@@ -86,9 +65,9 @@ export const getOfferFormOptions = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Offer form options fetched successfully',
+        message: 'Store offer form options fetched successfully',
         data: {
-          stores: formattedStores,
+          storeId: employeeStoreId ? employeeStoreId.toString() : null,
           customers: formattedCustomers,
           products: combinedProductOptions,
           categories: formattedCategories,
@@ -101,17 +80,16 @@ export const getOfferFormOptions = async (req, res, next) => {
 };
 
 /**
- * Create a new Offer (Store Wide or Special Offer)
+ * Create a new Offer from Store Panel (Automatically scoped to employee store)
  */
-export const createOffer = async (req, res, next) => {
+export const createStoreOffer = async (req, res, next) => {
   try {
+    const employeeStoreId = req.storeEmployee?.storeId;
     const {
       name,
       description,
       offerType,
       offersOn,
-      stores,
-      applyToAllStores,
       validFrom,
       validTo,
       discountType,
@@ -139,8 +117,8 @@ export const createOffer = async (req, res, next) => {
       description: description ? description.trim() : '',
       offerType: offerType || 'store_wide',
       offersOn: offersOn || 'both',
-      stores: Array.isArray(stores) ? stores : [],
-      applyToAllStores: applyToAllStores !== undefined ? applyToAllStores : !stores || stores.length === 0,
+      stores: employeeStoreId ? [employeeStoreId] : [],
+      applyToAllStores: !employeeStoreId,
       validFrom: fromDate,
       validTo: toDate,
       discountType,
@@ -150,17 +128,15 @@ export const createOffer = async (req, res, next) => {
       sendToAllCustomers: sendToAllCustomers !== undefined ? sendToAllCustomers : true,
       targetCustomers: Array.isArray(targetCustomers) ? targetCustomers : [],
       status: status || 'active',
-      createdBy: req.admin?._id,
     });
 
     const populatedOffer = await Offer.findById(offer._id)
       .populate('stores', 'name storeCode')
-      .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('createdBy', 'name email role');
+      .populate('targetCustomers', 'name phone email totalPurchase amountDue');
 
     return res.status(201).json(
       successResponse({
-        message: 'Offer created successfully',
+        message: 'Store offer created successfully',
         data: { offer: populatedOffer },
       })
     );
@@ -170,15 +146,20 @@ export const createOffer = async (req, res, next) => {
 };
 
 /**
- * Get all Offers with search, status filter (active, inactive, expired), date filter, and pagination
+ * Get all Offers for Store Panel (Applicable to employee store)
  */
-export const getOffers = async (req, res, next) => {
+export const getStoreOffers = async (req, res, next) => {
   try {
+    const employeeStoreId = req.storeEmployee?.storeId;
     const { search, status, startDate, endDate, page = 1, limit = 10 } = req.query;
 
     const filter = {
       isDeleted: false,
     };
+
+    if (employeeStoreId) {
+      filter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];
+    }
 
     if (startDate) {
       filter.validFrom = { $gte: new Date(startDate) };
@@ -191,7 +172,6 @@ export const getOffers = async (req, res, next) => {
     let offers = await Offer.find(filter)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email')
-      .populate('createdBy', 'name email role')
       .sort({ createdAt: -1 });
 
     const now = new Date();
@@ -247,7 +227,7 @@ export const getOffers = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Offers fetched successfully',
+        message: 'Store offers fetched successfully',
         data: { offers: paginatedOffers },
         pagination,
       })
@@ -258,16 +238,15 @@ export const getOffers = async (req, res, next) => {
 };
 
 /**
- * Get Offer details by ID
+ * Get Store Offer details by ID
  */
-export const getOfferById = async (req, res, next) => {
+export const getStoreOfferById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
     const offer = await Offer.findOne({ _id: id, isDeleted: false })
       .populate('stores', 'name storeCode location')
-      .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('createdBy', 'name email role');
+      .populate('targetCustomers', 'name phone email totalPurchase amountDue');
 
     if (!offer) {
       return next(notFound('Offer not found'));
@@ -279,7 +258,7 @@ export const getOfferById = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Offer details fetched successfully',
+        message: 'Store offer details fetched successfully',
         data: {
           offer: {
             ...offer.toObject(),
@@ -295,9 +274,9 @@ export const getOfferById = async (req, res, next) => {
 };
 
 /**
- * Update Offer details
+ * Update Store Offer details
  */
-export const updateOffer = async (req, res, next) => {
+export const updateStoreOffer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -311,8 +290,6 @@ export const updateOffer = async (req, res, next) => {
     if (updateData.description !== undefined) offer.description = updateData.description.trim();
     if (updateData.offerType !== undefined) offer.offerType = updateData.offerType;
     if (updateData.offersOn !== undefined) offer.offersOn = updateData.offersOn;
-    if (updateData.stores !== undefined) offer.stores = updateData.stores;
-    if (updateData.applyToAllStores !== undefined) offer.applyToAllStores = updateData.applyToAllStores;
     if (updateData.validFrom !== undefined) offer.validFrom = new Date(updateData.validFrom);
     if (updateData.validTo !== undefined) offer.validTo = new Date(updateData.validTo);
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
@@ -327,12 +304,11 @@ export const updateOffer = async (req, res, next) => {
 
     const updatedOffer = await Offer.findById(id)
       .populate('stores', 'name storeCode')
-      .populate('targetCustomers', 'name phone email')
-      .populate('createdBy', 'name email role');
+      .populate('targetCustomers', 'name phone email');
 
     return res.status(200).json(
       successResponse({
-        message: 'Offer updated successfully',
+        message: 'Store offer updated successfully',
         data: { offer: updatedOffer },
       })
     );
@@ -342,9 +318,9 @@ export const updateOffer = async (req, res, next) => {
 };
 
 /**
- * Toggle Offer Status (active/inactive)
+ * Toggle Store Offer Status
  */
-export const toggleOfferStatus = async (req, res, next) => {
+export const toggleStoreOfferStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -359,7 +335,7 @@ export const toggleOfferStatus = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: `Offer status changed to ${offer.status}`,
+        message: `Store offer status changed to ${offer.status}`,
         data: { id: offer._id, status: offer.status },
       })
     );
@@ -369,9 +345,9 @@ export const toggleOfferStatus = async (req, res, next) => {
 };
 
 /**
- * Delete Offer (soft delete)
+ * Delete Store Offer
  */
-export const deleteOffer = async (req, res, next) => {
+export const deleteStoreOffer = async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -385,7 +361,7 @@ export const deleteOffer = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Offer deleted successfully',
+        message: 'Store offer deleted successfully',
       })
     );
   } catch (error) {
@@ -394,12 +370,17 @@ export const deleteOffer = async (req, res, next) => {
 };
 
 /**
- * Export Offers List
+ * Export Store Offers List
  */
-export const exportOffers = async (_req, res, next) => {
+export const exportStoreOffers = async (req, res, next) => {
   try {
-    const offers = await Offer.find({ isDeleted: false }).sort({ createdAt: -1 });
+    const employeeStoreId = req.storeEmployee?.storeId;
+    const filter = { isDeleted: false };
+    if (employeeStoreId) {
+      filter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];
+    }
 
+    const offers = await Offer.find(filter).sort({ createdAt: -1 });
     const now = new Date();
 
     const exportData = offers.map((off, index) => {
@@ -420,7 +401,7 @@ export const exportOffers = async (_req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Offers export data generated successfully',
+        message: 'Store offers export data generated successfully',
         data: { offers: exportData, totalCount: offers.length },
       })
     );
