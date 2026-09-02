@@ -20,12 +20,14 @@ export const getDashboardOverview = async (req, res, next) => {
     const storeName = storeInfo ? storeInfo.name : 'Store';
 
     // Flexible store filter helper
-    const getStoreFilter = (storeField = 'storeId') => {
+    const getStoreFilter = (storeField = 'store') => {
       if (!employeeStoreId) return {};
       return {
         $or: [
           { [storeField]: employeeStoreId },
           { [storeField]: employeeStoreId.toString() },
+          { store: employeeStoreId },
+          { storeId: employeeStoreId },
           { [storeField]: null },
           { [storeField]: { $exists: false } },
         ],
@@ -34,15 +36,14 @@ export const getDashboardOverview = async (req, res, next) => {
 
     // 2. Metric Summary Cards
     const stockAggregate = await StoreProduct.aggregate([
-      { $match: { ...getStoreFilter('storeId'), isDeleted: false, status: 'active' } },
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
       { $group: { _id: null, totalStock: { $sum: '$stockQuantity' } } },
     ]);
     const availableStocks = stockAggregate.length > 0 ? stockAggregate[0].totalStock : 0;
 
     const totalProducts = await StoreProduct.countDocuments({
-      ...getStoreFilter('storeId'),
-      isDeleted: false,
-      status: 'active',
+      ...getStoreFilter('store'),
+      isDeleted: { $ne: true },
     });
 
     const totalCustomers = await Customer.countDocuments({
@@ -62,7 +63,14 @@ export const getDashboardOverview = async (req, res, next) => {
 
     const storeOrderRevenueAgg = await StoreOrder.aggregate([
       { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
-      { $group: { _id: null, totalRevenue: { $sum: '$netAmount' } } },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: {
+            $sum: { $ifNull: ['$totalOrderNet', { $ifNull: ['$netAmount', 0] }] },
+          },
+        },
+      },
     ]);
     const sellProductRevenueAgg = await SellProduct.aggregate([
       { $match: { ...getStoreFilter('store'), isDeleted: false } },
@@ -320,10 +328,30 @@ export const getDashboardOverview = async (req, res, next) => {
       if (!item || !item.productName) return;
       const name = item.productName;
       if (!productSalesMap[name]) {
-        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
+        productSalesMap[name] = { _id: item._id, productName: name, category: 'General', totalUnitsSold: 0 };
       }
       productSalesMap[name].totalUnitsSold += item.totalUnitsSold || 0;
     });
+
+    const productNames = Object.keys(productSalesMap);
+    if (productNames.length > 0) {
+      try {
+        const storeProducts = await StoreProduct.find({ productName: { $in: productNames } })
+          .populate('category', 'name categoryName')
+          .lean();
+        const catMap = {};
+        for (const sp of storeProducts) {
+          catMap[sp.productName] = sp.category?.name || sp.category?.categoryName || 'General';
+        }
+        for (const key of Object.keys(productSalesMap)) {
+          if (catMap[key]) {
+            productSalesMap[key].category = catMap[key];
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching categories for most demanding products:', e);
+      }
+    }
 
     const mostDemandingProducts = Object.values(productSalesMap)
       .sort((a, b) => b.totalUnitsSold - a.totalUnitsSold)
@@ -331,7 +359,7 @@ export const getDashboardOverview = async (req, res, next) => {
       .map((item) => ({
         _id: item._id,
         productName: item.productName,
-        category: 'General',
+        category: item.category || 'General',
         totalUnitsSold: item.totalUnitsSold,
       }));
 
