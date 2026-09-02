@@ -11,46 +11,61 @@ import { getPagination } from '../../utils/pagination.js';
  */
 export const getDashboardOverview = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
 
     // 1. Store Header Info
-    const storeInfo = await Store.findById(employeeStoreId).select('name storeCode location');
+    const storeInfo = employeeStoreId
+      ? await Store.findById(employeeStoreId).select('name storeCode location')
+      : null;
     const storeName = storeInfo ? storeInfo.name : 'Store';
+
+    // Flexible store filter helper
+    const getStoreFilter = (storeField = 'storeId') => {
+      if (!employeeStoreId) return {};
+      return {
+        $or: [
+          { [storeField]: employeeStoreId },
+          { [storeField]: employeeStoreId.toString() },
+          { [storeField]: null },
+          { [storeField]: { $exists: false } },
+        ],
+      };
+    };
 
     // 2. Metric Summary Cards
     const stockAggregate = await StoreProduct.aggregate([
-      { $match: { storeId: employeeStoreId, isDeleted: false, status: 'active' } },
+      { $match: { ...getStoreFilter('storeId'), isDeleted: false, status: 'active' } },
       { $group: { _id: null, totalStock: { $sum: '$stockQuantity' } } },
     ]);
     const availableStocks = stockAggregate.length > 0 ? stockAggregate[0].totalStock : 0;
 
     const totalProducts = await StoreProduct.countDocuments({
-      storeId: employeeStoreId,
+      ...getStoreFilter('storeId'),
       isDeleted: false,
       status: 'active',
     });
 
     const totalCustomers = await Customer.countDocuments({
-      $or: [{ storeId: employeeStoreId }, { storeId: null }],
+      ...getStoreFilter('storeId'),
       status: 'active',
     });
 
     const storeOrdersCount = await StoreOrder.countDocuments({
-      store: employeeStoreId,
+      ...getStoreFilter('store'),
       isDeleted: { $ne: true },
     });
     const sellProductsCount = await SellProduct.countDocuments({
-      store: employeeStoreId,
+      ...getStoreFilter('store'),
       isDeleted: false,
     });
     const totalOrders = storeOrdersCount + sellProductsCount;
 
     const storeOrderRevenueAgg = await StoreOrder.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
       { $group: { _id: null, totalRevenue: { $sum: '$netAmount' } } },
     ]);
     const sellProductRevenueAgg = await SellProduct.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: false } },
+      { $match: { ...getStoreFilter('store'), isDeleted: false } },
       { $group: { _id: null, totalRevenue: { $sum: '$netAmount' } } },
     ]);
     const totalRevenue =
@@ -67,7 +82,7 @@ export const getDashboardOverview = async (req, res, next) => {
     const customerAgg = await Customer.aggregate([
       {
         $match: {
-          $or: [{ storeId: employeeStoreId }, { storeId: null }],
+          ...getStoreFilter('storeId'),
           status: 'active',
           createdAt: { $gte: new Date(`${previousYear}-01-01`), $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`) },
         },
@@ -101,7 +116,7 @@ export const getDashboardOverview = async (req, res, next) => {
     const storeOrderSalesAgg = await StoreOrder.aggregate([
       {
         $match: {
-          store: employeeStoreId,
+          ...getStoreFilter('store'),
           isDeleted: { $ne: true },
           createdAt: { $gte: new Date(`${previousYear}-01-01`), $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`) },
         },
@@ -132,7 +147,7 @@ export const getDashboardOverview = async (req, res, next) => {
     const sellProductSalesAgg = await SellProduct.aggregate([
       {
         $match: {
-          store: employeeStoreId,
+          ...getStoreFilter('store'),
           isDeleted: false,
           billDate: { $gte: new Date(`${previousYear}-01-01`), $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`) },
         },
@@ -162,12 +177,12 @@ export const getDashboardOverview = async (req, res, next) => {
 
     // 4. Preview Widgets (Top 5 items)
     // Recent Orders (Fetch from both StoreOrder & SellProduct)
-    const storeOrdersRaw = await StoreOrder.find({ store: employeeStoreId, isDeleted: { $ne: true } })
-      .select('orderId netAmount createdAt')
+    const storeOrdersRaw = await StoreOrder.find({ ...getStoreFilter('store'), isDeleted: { $ne: true } })
+      .select('orderId netAmount customer createdAt')
       .sort({ createdAt: -1 })
       .limit(5);
 
-    const sellProductsRaw = await SellProduct.find({ store: employeeStoreId, isDeleted: false })
+    const sellProductsRaw = await SellProduct.find({ ...getStoreFilter('store'), isDeleted: false })
       .select('sellId netAmount billDate createdAt')
       .sort({ billDate: -1, createdAt: -1 })
       .limit(5);
@@ -177,6 +192,7 @@ export const getDashboardOverview = async (req, res, next) => {
         _id: o._id,
         orderId: o.orderId,
         amount: o.netAmount,
+        customerName: o.customer ? o.customer.name : 'Walk-in Customer',
         time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',
         rawDate: o.createdAt,
@@ -185,6 +201,7 @@ export const getDashboardOverview = async (req, res, next) => {
         _id: o._id,
         orderId: o.sellId,
         amount: o.netAmount,
+        customerName: 'Walk-in Customer',
         time: o.billDate ? o.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         date: o.billDate ? o.billDate.toISOString().split('T')[0] : '',
         rawDate: o.billDate || o.createdAt,
@@ -195,7 +212,7 @@ export const getDashboardOverview = async (req, res, next) => {
 
     // Recent Customers (Top 5)
     const recentCustomersRaw = await Customer.find({
-      $or: [{ storeId: employeeStoreId }, { storeId: null }],
+      ...getStoreFilter('storeId'),
       status: 'active',
     })
       .select('name phone email createdAt')
@@ -210,9 +227,9 @@ export const getDashboardOverview = async (req, res, next) => {
       date: c.createdAt ? c.createdAt.toISOString().split('T')[0] : '',
     }));
 
-    // Low Stock Products (Top 5 where stock <= 10 or <= alertQuantity)
+    // Low Stock Products (Top 5 where stock <= alertQuantity or <= 10)
     const lowStockRaw = await StoreProduct.find({
-      storeId: employeeStoreId,
+      ...getStoreFilter('storeId'),
       isDeleted: false,
       status: 'active',
       $expr: { $lte: ['$stockQuantity', { $ifNull: ['$alertQuantity', 10] }] },
@@ -234,7 +251,7 @@ export const getDashboardOverview = async (req, res, next) => {
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const expiringRaw = await StoreProduct.find({
-      storeId: employeeStoreId,
+      ...getStoreFilter('storeId'),
       isDeleted: false,
       status: 'active',
       expiryDate: { $ne: null, $gte: now, $lte: thirtyDaysFromNow },
@@ -257,21 +274,35 @@ export const getDashboardOverview = async (req, res, next) => {
     });
 
     // Most Demanding Products (Top 5 Best-Selling Products from StoreOrder & SellProduct)
-    const storeOrderItemsAgg = await StoreOrder.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
-      { $unwind: '$bills' },
-      { $unwind: '$bills.items' },
+    const storeOrderBillsAgg = await StoreOrder.aggregate([
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
+      { $unwind: { path: '$bills', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$bills.items', preserveNullAndEmptyArrays: true } },
       {
         $group: {
-          _id: '$bills.items.product',
+          _id: { $ifNull: ['$bills.items.product', '$bills.items.productName'] },
           productName: { $first: '$bills.items.productName' },
           totalUnitsSold: { $sum: '$bills.items.quantity' },
         },
       },
+      { $match: { productName: { $ne: null } } },
+    ]);
+
+    const storeOrderTopItemsAgg = await StoreOrder.aggregate([
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
+      { $unwind: { path: '$items', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: { $ifNull: ['$items.product', '$items.productName'] },
+          productName: { $first: '$items.productName' },
+          totalUnitsSold: { $sum: '$items.quantity' },
+        },
+      },
+      { $match: { productName: { $ne: null } } },
     ]);
 
     const sellProductItemsAgg = await SellProduct.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: false } },
+      { $match: { ...getStoreFilter('store'), isDeleted: false } },
       { $unwind: '$items' },
       {
         $group: {
@@ -280,24 +311,18 @@ export const getDashboardOverview = async (req, res, next) => {
           totalUnitsSold: { $sum: '$items.quantity' },
         },
       },
+      { $match: { productName: { $ne: null } } },
     ]);
 
     const productSalesMap = {};
 
-    storeOrderItemsAgg.forEach((item) => {
-      const name = item.productName || 'Product';
+    [...storeOrderBillsAgg, ...storeOrderTopItemsAgg, ...sellProductItemsAgg].forEach((item) => {
+      if (!item || !item.productName) return;
+      const name = item.productName;
       if (!productSalesMap[name]) {
         productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
       }
-      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
-    });
-
-    sellProductItemsAgg.forEach((item) => {
-      const name = item.productName || 'Product';
-      if (!productSalesMap[name]) {
-        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
-      }
-      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold || 0;
     });
 
     const mostDemandingProducts = Object.values(productSalesMap)
@@ -359,11 +384,23 @@ export const getDashboardOverview = async (req, res, next) => {
  */
 export const getSeeAllRecentOrders = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { search, page = 1, limit = 10 } = req.query;
 
-    const storeOrderFilter = { store: employeeStoreId, isDeleted: { $ne: true } };
-    const sellProductFilter = { store: employeeStoreId, isDeleted: false };
+    const getStoreFilter = (storeField = 'store') => {
+      if (!employeeStoreId) return {};
+      return {
+        $or: [
+          { [storeField]: employeeStoreId },
+          { [storeField]: employeeStoreId.toString() },
+          { [storeField]: null },
+          { [storeField]: { $exists: false } },
+        ],
+      };
+    };
+
+    const storeOrderFilter = { ...getStoreFilter('store'), isDeleted: { $ne: true } };
+    const sellProductFilter = { ...getStoreFilter('store'), isDeleted: false };
 
     if (search) {
       const reg = { $regex: search.trim(), $options: 'i' };
@@ -421,13 +458,21 @@ export const getSeeAllRecentOrders = async (req, res, next) => {
  */
 export const getSeeAllRecentCustomers = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { search, page = 1, limit = 10 } = req.query;
 
     const filter = {
-      $or: [{ storeId: employeeStoreId }, { storeId: null }],
       status: 'active',
     };
+
+    if (employeeStoreId) {
+      filter.$or = [
+        { storeId: employeeStoreId },
+        { storeId: employeeStoreId.toString() },
+        { storeId: null },
+        { storeId: { $exists: false } },
+      ];
+    }
 
     if (search) {
       const query = search.trim();
@@ -477,15 +522,23 @@ export const getSeeAllRecentCustomers = async (req, res, next) => {
  */
 export const getSeeAllLowStockProducts = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { search, threshold = 10, page = 1, limit = 10 } = req.query;
 
     const filter = {
-      storeId: employeeStoreId,
       isDeleted: false,
       status: 'active',
       $expr: { $lte: ['$stockQuantity', { $ifNull: ['$alertQuantity', Number(threshold)] }] },
     };
+
+    if (employeeStoreId) {
+      filter.$or = [
+        { storeId: employeeStoreId },
+        { storeId: employeeStoreId.toString() },
+        { storeId: null },
+        { storeId: { $exists: false } },
+      ];
+    }
 
     if (search) {
       filter.productName = { $regex: search.trim(), $options: 'i' };
@@ -528,18 +581,26 @@ export const getSeeAllLowStockProducts = async (req, res, next) => {
  */
 export const getSeeAllExpiringProducts = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { search, days = 30, page = 1, limit = 10 } = req.query;
 
     const now = new Date();
     const maxExpiryDate = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
 
     const filter = {
-      storeId: employeeStoreId,
       isDeleted: false,
       status: 'active',
       expiryDate: { $ne: null, $gte: now, $lte: maxExpiryDate },
     };
+
+    if (employeeStoreId) {
+      filter.$or = [
+        { storeId: employeeStoreId },
+        { storeId: employeeStoreId.toString() },
+        { storeId: null },
+        { storeId: { $exists: false } },
+      ];
+    }
 
     if (search) {
       filter.productName = { $regex: search.trim(), $options: 'i' };
@@ -585,24 +646,50 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
  */
 export const getSeeAllMostDemandingProducts = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { page = 1, limit = 10 } = req.query;
 
-    const storeOrderItemsAgg = await StoreOrder.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
-      { $unwind: '$bills' },
-      { $unwind: '$bills.items' },
+    const getStoreFilter = (storeField = 'store') => {
+      if (!employeeStoreId) return {};
+      return {
+        $or: [
+          { [storeField]: employeeStoreId },
+          { [storeField]: employeeStoreId.toString() },
+          { [storeField]: null },
+          { [storeField]: { $exists: false } },
+        ],
+      };
+    };
+
+    const storeOrderBillsAgg = await StoreOrder.aggregate([
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
+      { $unwind: { path: '$bills', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$bills.items', preserveNullAndEmptyArrays: true } },
       {
         $group: {
-          _id: '$bills.items.product',
+          _id: { $ifNull: ['$bills.items.product', '$bills.items.productName'] },
           productName: { $first: '$bills.items.productName' },
           totalUnitsSold: { $sum: '$bills.items.quantity' },
         },
       },
+      { $match: { productName: { $ne: null } } },
+    ]);
+
+    const storeOrderTopItemsAgg = await StoreOrder.aggregate([
+      { $match: { ...getStoreFilter('store'), isDeleted: { $ne: true } } },
+      { $unwind: { path: '$items', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: { $ifNull: ['$items.product', '$items.productName'] },
+          productName: { $first: '$items.productName' },
+          totalUnitsSold: { $sum: '$items.quantity' },
+        },
+      },
+      { $match: { productName: { $ne: null } } },
     ]);
 
     const sellProductItemsAgg = await SellProduct.aggregate([
-      { $match: { store: employeeStoreId, isDeleted: false } },
+      { $match: { ...getStoreFilter('store'), isDeleted: false } },
       { $unwind: '$items' },
       {
         $group: {
@@ -611,24 +698,18 @@ export const getSeeAllMostDemandingProducts = async (req, res, next) => {
           totalUnitsSold: { $sum: '$items.quantity' },
         },
       },
+      { $match: { productName: { $ne: null } } },
     ]);
 
     const productSalesMap = {};
 
-    storeOrderItemsAgg.forEach((item) => {
-      const name = item.productName || 'Product';
+    [...storeOrderBillsAgg, ...storeOrderTopItemsAgg, ...sellProductItemsAgg].forEach((item) => {
+      if (!item || !item.productName) return;
+      const name = item.productName;
       if (!productSalesMap[name]) {
         productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
       }
-      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
-    });
-
-    sellProductItemsAgg.forEach((item) => {
-      const name = item.productName || 'Product';
-      if (!productSalesMap[name]) {
-        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
-      }
-      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold || 0;
     });
 
     const sortedProducts = Object.values(productSalesMap).sort((a, b) => b.totalUnitsSold - a.totalUnitsSold);
