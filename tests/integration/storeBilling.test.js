@@ -8,7 +8,7 @@ describe('Store Billing & Returns Multi-Bill Logic', () => {
     const bitSeq = getCode128BitString('8903448120588');
     expect(typeof bitSeq).toBe('string');
     expect(bitSeq.length).toBeGreaterThan(50);
-    expect(bitSeq.startsWith('1100')).toBe(true);
+    expect(bitSeq.startsWith('1101')).toBe(true);
   });
 
   it('should validate StoreOrder model structure with multiple bills and returns', async () => {
