@@ -248,7 +248,9 @@ export const getStoreProductById = async (req, res, next) => {
 };
 
 /**
- * CREATE Store Product
+ * CREATE Store Product / ADD Stock
+ * Accepts barcode from frontend or auto-generates if empty.
+ * If active product with same barcode already exists in store, increases inventory.
  */
 export const createStoreProduct = async (req, res, next) => {
   try {
@@ -288,17 +290,121 @@ export const createStoreProduct = async (req, res, next) => {
     if (!brand) throw badRequest('Brand is required');
     if (!unit) throw badRequest('Unit is required');
 
+    const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
+    const createdBy = req.storeEmployee?._id || null;
+    const incomingQty = Number(stockQuantity) || 0;
+    const alertQty = Number(alertQuantity !== undefined ? alertQuantity : minStockAlert) || 0;
+
+    // Process image
+    const imageUrl = await processUploadedFile(req.file, productImage, req);
+
+    // Parse attributes if string
+    let parsedAttributes = attributes;
+    if (typeof attributes === 'string') {
+      try {
+        parsedAttributes = JSON.parse(attributes);
+      } catch (_e) {
+        parsedAttributes = [];
+      }
+    }
+
     // Barcode resolution
     let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
+    const resolvedBatchCode = (batch || newBatchCode || '').trim();
+
     if (finalBarcode !== '') {
-      const existing = await StoreProduct.findOne({
+      // Check if product with this barcode already exists in this store
+      const existingProduct = await StoreProduct.findOne({
         barcode: finalBarcode,
         isDeleted: false,
+        ...(storeId ? { storeId } : {}),
       });
-      if (existing) {
-        throw conflict('An active product with this barcode already exists');
+
+      if (existingProduct) {
+        // INCREASE INVENTORY for existing product
+        existingProduct.stockQuantity = (Number(existingProduct.stockQuantity) || 0) + incomingQty;
+        if (cleanProductName) existingProduct.productName = cleanProductName;
+        if (productType) existingProduct.productType = productType;
+        if (category) existingProduct.category = category;
+        if (subcategory) existingProduct.subcategory = subcategory;
+        if (brand) existingProduct.brand = brand;
+        if (unit) existingProduct.unit = unit;
+        if (piece !== undefined) existingProduct.piece = Number(piece) || existingProduct.piece;
+        if (alertQty > 0) {
+          existingProduct.alertQuantity = alertQty;
+          existingProduct.minStockAlert = alertQty;
+        }
+        if (mrp !== undefined) existingProduct.mrp = Number(mrp) || existingProduct.mrp;
+        if (offlineSellingPrice !== undefined) existingProduct.offlineSellingPrice = Number(offlineSellingPrice) || existingProduct.offlineSellingPrice;
+        if (onlineSellingPrice !== undefined) existingProduct.onlineSellingPrice = Number(onlineSellingPrice) || existingProduct.onlineSellingPrice;
+        if (purchasePrice !== undefined) existingProduct.purchasePrice = Number(purchasePrice) || existingProduct.purchasePrice;
+        if (manufactureDate) existingProduct.manufactureDate = new Date(manufactureDate);
+        if (expiryDate) existingProduct.expiryDate = new Date(expiryDate);
+        if (hsnCode) existingProduct.hsnCode = String(hsnCode).trim();
+        if (imageUrl) existingProduct.productImage = imageUrl;
+        if (Array.isArray(parsedAttributes) && parsedAttributes.length > 0) {
+          existingProduct.attributes = parsedAttributes;
+        }
+        existingProduct.status = 'active';
+
+        // Manage product's own independent batches
+        if (!Array.isArray(existingProduct.batches)) {
+          existingProduct.batches = [];
+        }
+
+        if (resolvedBatchCode) {
+          const batchIndex = existingProduct.batches.findIndex(
+            (b) => b.batchNumber && b.batchNumber.toLowerCase() === resolvedBatchCode.toLowerCase()
+          );
+
+          if (batchIndex >= 0) {
+            existingProduct.batches[batchIndex].stockQuantity =
+              (Number(existingProduct.batches[batchIndex].stockQuantity) || 0) + incomingQty;
+            if (mrp !== undefined) existingProduct.batches[batchIndex].mrp = Number(mrp) || existingProduct.batches[batchIndex].mrp;
+            if (offlineSellingPrice !== undefined) existingProduct.batches[batchIndex].offlineSellingPrice = Number(offlineSellingPrice) || existingProduct.batches[batchIndex].offlineSellingPrice;
+            if (onlineSellingPrice !== undefined) existingProduct.batches[batchIndex].onlineSellingPrice = Number(onlineSellingPrice) || existingProduct.batches[batchIndex].onlineSellingPrice;
+            if (manufactureDate) existingProduct.batches[batchIndex].manufactureDate = new Date(manufactureDate);
+            if (expiryDate) existingProduct.batches[batchIndex].expiryDate = new Date(expiryDate);
+          } else {
+            existingProduct.batches.push({
+              batchNumber: resolvedBatchCode,
+              stockQuantity: incomingQty,
+              mrp: Number(mrp) || 0,
+              offlineSellingPrice: Number(offlineSellingPrice) || 0,
+              onlineSellingPrice: Number(onlineSellingPrice) || 0,
+              manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
+              expiryDate: expiryDate ? new Date(expiryDate) : null,
+            });
+          }
+          existingProduct.batch = resolvedBatchCode;
+          existingProduct.batchType = batchType ? String(batchType).trim() : 'Old Batch';
+        }
+
+        await existingProduct.save();
+
+        const populatedExisting = await StoreProduct.findById(existingProduct._id)
+          .populate('productType', 'name')
+          .populate('category', 'name')
+          .populate('subcategory', 'name')
+          .populate('brand', 'name')
+          .populate('unit', 'name shortName');
+
+        const { statusText, statusCode } = computeStockStatus(populatedExisting);
+
+        return res.status(200).json(
+          successResponse({
+            message: `Product stock inventory updated successfully. New total stock: ${populatedExisting.stockQuantity}`,
+            data: {
+              product: populatedExisting,
+              stockStatus: statusText,
+              stockStatusCode: statusCode,
+              isUpdatedStock: true,
+            },
+          })
+        );
       }
     } else {
+      // Auto-generate barcode if not provided
       let isUnique = false;
       let attempts = 0;
       while (!isUnique && attempts < 10) {
@@ -314,23 +420,18 @@ export const createStoreProduct = async (req, res, next) => {
       }
     }
 
-    // Process image
-    const imageUrl = await processUploadedFile(req.file, productImage, req);
-
-    // Parse attributes if string
-    let parsedAttributes = attributes;
-    if (typeof attributes === 'string') {
-      try {
-        parsedAttributes = JSON.parse(attributes);
-      } catch (_e) {
-        parsedAttributes = [];
-      }
-    }
-
-    const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
-    const createdBy = req.storeEmployee?._id || null;
-
-    const alertQty = Number(alertQuantity !== undefined ? alertQuantity : minStockAlert) || 0;
+    const defaultInitialBatch = resolvedBatchCode || `B${new Date().toISOString().slice(2, 10).replace(/-/g, '')}A`;
+    const initialBatches = [
+      {
+        batchNumber: defaultInitialBatch,
+        stockQuantity: incomingQty,
+        mrp: Number(mrp) || 0,
+        offlineSellingPrice: Number(offlineSellingPrice) || 0,
+        onlineSellingPrice: Number(onlineSellingPrice) || 0,
+        manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+      },
+    ];
 
     const newProduct = await StoreProduct.create({
       barcode: finalBarcode,
@@ -340,11 +441,12 @@ export const createStoreProduct = async (req, res, next) => {
       category,
       subcategory,
       brand,
-      batchType: batchType ? String(batchType).trim() : 'Old Batch',
-      batch: batch !== undefined && batch !== null ? String(batch).trim() : 'B240701A',
+      batchType: batchType ? String(batchType).trim() : 'New Batch',
+      batch: defaultInitialBatch,
+      batches: initialBatches,
       unit,
       piece: Number(piece) || 1,
-      stockQuantity: Number(stockQuantity) || 0,
+      stockQuantity: incomingQty,
       alertQuantity: alertQty,
       minStockAlert: alertQty,
       mrp: Number(mrp) || 0,
@@ -376,6 +478,7 @@ export const createStoreProduct = async (req, res, next) => {
           product: populated,
           stockStatus: statusText,
           stockStatusCode: statusCode,
+          isUpdatedStock: false,
         },
       })
     );
@@ -588,7 +691,7 @@ export const getStoreProductAttributes = async (req, res, next) => {
  */
 export const getStoreProductDropdownOptions = async (req, res, next) => {
   try {
-    const { productType, category } = req.query;
+    const { productType, category, productId, barcode } = req.query;
 
     // Active Product Types
     const productTypes = await ProductType.find({ status: 'active' })
@@ -620,10 +723,39 @@ export const getStoreProductDropdownOptions = async (req, res, next) => {
       .select('name shortName _id')
       .sort({ name: 1 });
 
-    // Distinct existing batches
-    const existingBatches = await StoreProduct.distinct('batch', { isDeleted: false });
-    const defaultBatches = ['B240701A', 'B240701B', 'B240701C'];
-    const batches = Array.from(new Set([...defaultBatches, ...existingBatches])).filter(Boolean);
+    // Product-specific batches (loaded only for the specified product)
+    let productBatches = [];
+    if (productId || barcode) {
+      const targetProd = await StoreProduct.findOne({
+        ...(productId ? { _id: productId } : { barcode: String(barcode).trim() }),
+        isDeleted: false,
+      });
+
+      if (targetProd) {
+        if (Array.isArray(targetProd.batches) && targetProd.batches.length > 0) {
+          productBatches = targetProd.batches.map((b) => ({
+            label: `${b.batchNumber} (Stock: ${b.stockQuantity || 0})`,
+            value: b.batchNumber,
+            batchNumber: b.batchNumber,
+            stockQuantity: b.stockQuantity,
+            mrp: b.mrp,
+            offlineSellingPrice: b.offlineSellingPrice,
+            onlineSellingPrice: b.onlineSellingPrice,
+            manufactureDate: b.manufactureDate,
+            expiryDate: b.expiryDate,
+          }));
+        } else if (targetProd.batch) {
+          productBatches = [
+            {
+              label: `${targetProd.batch} (Stock: ${targetProd.stockQuantity || 0})`,
+              value: targetProd.batch,
+              batchNumber: targetProd.batch,
+              stockQuantity: targetProd.stockQuantity,
+            },
+          ];
+        }
+      }
+    }
 
     return res.status(200).json(
       successResponse({
@@ -634,7 +766,7 @@ export const getStoreProductDropdownOptions = async (req, res, next) => {
           subcategories: subcategories.map((s) => ({ label: s.name, value: s._id, category: s.category })),
           brands: brands.map((b) => ({ label: b.name, value: b._id })),
           units: units.map((u) => ({ label: `${u.name} (${u.shortName || u.name})`, value: u._id, name: u.name, shortName: u.shortName })),
-          batches: batches.map((b) => ({ label: b, value: b })),
+          batches: productBatches,
         },
       })
     );

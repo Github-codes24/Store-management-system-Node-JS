@@ -1,6 +1,7 @@
 import Offer from '../../models/offer.model.js';
 import Customer from '../../models/customer.model.js';
 import AdminProduct from '../../models/adminProduct.model.js';
+import StoreProduct from '../../models/storeProduct.model.js';
 import Category from '../../models/category.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
@@ -11,7 +12,7 @@ import { getPagination } from '../../utils/pagination.js';
  */
 export const getStoreOfferFormOptions = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
 
     // Fetch live customers registered at this employee's assigned store (or storeId null)
     const customerFilter = { status: 'active' };
@@ -22,37 +23,72 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
       ];
     }
 
-    const customers = await Customer.find(customerFilter)
+    let customers = await Customer.find(customerFilter)
       .select('_id name phone email storeId totalPurchase amountDue')
-      .sort({ name: 1 });
+      .sort({ name: 1 })
+      .lean();
+
+    if (customers.length === 0) {
+      customers = await Customer.find({ status: 'active' })
+        .select('_id name phone email storeId totalPurchase amountDue')
+        .sort({ name: 1 })
+        .lean();
+    }
 
     const formattedCustomers = customers.map((c) => ({
       id: c._id.toString(),
+      _id: c._id.toString(),
       name: c.name,
       mobile: c.phone,
+      phone: c.phone,
       storeId: c.storeId ? c.storeId.toString() : null,
       totalPurchase: c.totalPurchase || 0,
       amountDue: c.amountDue || 0,
     }));
 
-    // Fetch live products
-    const liveProducts = await AdminProduct.find({ isDeleted: false })
-      .select('_id productName status')
-      .sort({ productName: 1 });
+    // Fetch live products (from StoreProduct first, fallback to AdminProduct)
+    let productItems = [];
+    if (employeeStoreId) {
+      const storeProducts = await StoreProduct.find({ store: employeeStoreId, isDeleted: { $ne: true } })
+        .select('_id productName barcode batch mrp')
+        .sort({ productName: 1 })
+        .lean();
+
+      if (storeProducts.length > 0) {
+        productItems = storeProducts.map((p) => ({
+          id: p._id.toString(),
+          _id: p._id.toString(),
+          name: p.productName,
+          barcode: p.barcode || '',
+          type: 'store_product',
+        }));
+      }
+    }
+
+    if (productItems.length === 0) {
+      const liveProducts = await AdminProduct.find({ isDeleted: false })
+        .select('_id productName barcode')
+        .sort({ productName: 1 })
+        .lean();
+
+      productItems = liveProducts.map((p) => ({
+        id: p._id.toString(),
+        _id: p._id.toString(),
+        name: p.productName || p.name,
+        barcode: p.barcode || '',
+        type: 'product',
+      }));
+    }
 
     // Fetch live categories
     const liveCategories = await Category.find({ status: 'active' })
       .select('_id name')
-      .sort({ name: 1 });
-
-    const formattedProducts = liveProducts.map((p) => ({
-      id: p._id.toString(),
-      name: p.productName || p.name,
-      type: 'product',
-    }));
+      .sort({ name: 1 })
+      .lean();
 
     const formattedCategories = liveCategories.map((cat) => ({
       id: cat._id.toString(),
+      _id: cat._id.toString(),
       name: `All ${cat.name}`,
       type: 'category',
     }));
@@ -60,7 +96,7 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
     const combinedProductOptions = [
       { id: 'ALL_PRODUCTS', name: 'All Products', type: 'general' },
       ...formattedCategories,
-      ...formattedProducts,
+      ...productItems,
     ];
 
     return res.status(200).json(
@@ -70,6 +106,7 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
           storeId: employeeStoreId ? employeeStoreId.toString() : null,
           customers: formattedCustomers,
           products: combinedProductOptions,
+          rawProducts: productItems,
           categories: formattedCategories,
         },
       })
@@ -80,11 +117,44 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
 };
 
 /**
+ * Helper to parse multiple date formats (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, ISO)
+ */
+export const parseFlexibleDate = (dateStr) => {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date && !isNaN(dateStr.getTime())) return dateStr;
+
+  if (typeof dateStr === 'string') {
+    const trimmed = dateStr.trim();
+    // DD/MM/YYYY or DD-MM-YYYY
+    const dmyMatch = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (dmyMatch) {
+      const day = parseInt(dmyMatch[1], 10);
+      const month = parseInt(dmyMatch[2], 10) - 1;
+      const year = parseInt(dmyMatch[3], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) return d;
+    }
+    // YYYY-MM-DD or YYYY/MM/DD
+    const ymdMatch = trimmed.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+    if (ymdMatch) {
+      const year = parseInt(ymdMatch[1], 10);
+      const month = parseInt(ymdMatch[2], 10) - 1;
+      const day = parseInt(ymdMatch[3], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) return d;
+    }
+    const standard = new Date(trimmed);
+    if (!isNaN(standard.getTime())) return standard;
+  }
+  return null;
+};
+
+/**
  * Create a new Offer from Store Panel (Automatically scoped to employee store)
  */
 export const createStoreOffer = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
     const {
       name,
       description,
@@ -101,11 +171,11 @@ export const createStoreOffer = async (req, res, next) => {
       status,
     } = req.body;
 
-    const fromDate = new Date(validFrom);
-    const toDate = new Date(validTo);
+    const fromDate = parseFlexibleDate(validFrom);
+    const toDate = parseFlexibleDate(validTo);
 
-    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
-      return next(badRequest('Invalid validFrom or validTo date format'));
+    if (!fromDate || !toDate) {
+      return next(badRequest('Invalid validFrom or validTo date format. Please use DD/MM/YYYY or YYYY-MM-DD'));
     }
 
     if (toDate < fromDate) {
@@ -150,7 +220,7 @@ export const createStoreOffer = async (req, res, next) => {
  */
 export const getStoreOffers = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
     const { search, status, startDate, endDate, page = 1, limit = 10 } = req.query;
 
     const filter = {
@@ -162,11 +232,13 @@ export const getStoreOffers = async (req, res, next) => {
     }
 
     if (startDate) {
-      filter.validFrom = { $gte: new Date(startDate) };
+      const d = parseFlexibleDate(startDate);
+      if (d) filter.validFrom = { $gte: d };
     }
 
     if (endDate) {
-      filter.validTo = { $lte: new Date(endDate) };
+      const d = parseFlexibleDate(endDate);
+      if (d) filter.validTo = { $lte: d };
     }
 
     let offers = await Offer.find(filter)
@@ -290,8 +362,14 @@ export const updateStoreOffer = async (req, res, next) => {
     if (updateData.description !== undefined) offer.description = updateData.description.trim();
     if (updateData.offerType !== undefined) offer.offerType = updateData.offerType;
     if (updateData.offersOn !== undefined) offer.offersOn = updateData.offersOn;
-    if (updateData.validFrom !== undefined) offer.validFrom = new Date(updateData.validFrom);
-    if (updateData.validTo !== undefined) offer.validTo = new Date(updateData.validTo);
+    if (updateData.validFrom !== undefined) {
+      const d = parseFlexibleDate(updateData.validFrom);
+      if (d) offer.validFrom = d;
+    }
+    if (updateData.validTo !== undefined) {
+      const d = parseFlexibleDate(updateData.validTo);
+      if (d) offer.validTo = d;
+    }
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
@@ -374,7 +452,7 @@ export const deleteStoreOffer = async (req, res, next) => {
  */
 export const exportStoreOffers = async (req, res, next) => {
   try {
-    const employeeStoreId = req.storeEmployee?.storeId;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
     const filter = { isDeleted: false };
     if (employeeStoreId) {
       filter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];

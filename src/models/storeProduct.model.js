@@ -1,5 +1,44 @@
 import mongoose from 'mongoose';
 
+const batchItemSchema = new mongoose.Schema(
+  {
+    batchNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    stockQuantity: {
+      type: Number,
+      default: 0,
+      min: [0, 'Batch stock cannot be negative'],
+    },
+    mrp: {
+      type: Number,
+      default: 0,
+    },
+    offlineSellingPrice: {
+      type: Number,
+      default: 0,
+    },
+    onlineSellingPrice: {
+      type: Number,
+      default: 0,
+    },
+    manufactureDate: {
+      type: Date,
+      default: null,
+    },
+    expiryDate: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+    _id: true,
+  }
+);
+
 const storeProductSchema = new mongoose.Schema(
   {
     barcode: {
@@ -39,13 +78,15 @@ const storeProductSchema = new mongoose.Schema(
     batchType: {
       type: String,
       enum: ['Old Batch', 'New Batch'],
-      default: 'Old Batch',
+      default: 'New Batch',
     },
     batch: {
       type: String,
       trim: true,
-      default: 'B240701A',
+      default: '',
     },
+    // Product-specific batches array
+    batches: [batchItemSchema],
     unit: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Unit',
