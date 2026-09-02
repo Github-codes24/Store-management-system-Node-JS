@@ -5,6 +5,7 @@ import storeProductRoutes from './storeProduct.routes.js';
 import storeBillingRoutes from './storeBilling.routes.js';
 import storeCustomerRoutes from './storeCustomer.route.js';
 import storeEmployeeOfferRouter from './storeEmployee.offer.route.js';
+import storeReportRoutes from './storeReport.routes.js';
 
 const router = Router();
 
@@ -25,5 +26,8 @@ router.use('/customers', storeCustomerRoutes);
 
 // Store Employee Offers Routes (/api/store-employee/offers)
 router.use('/offers', storeEmployeeOfferRouter);
+
+// Store Employee Reports Routes (/api/store-employee/reports)
+router.use('/reports', storeReportRoutes);
 
 export default router;
