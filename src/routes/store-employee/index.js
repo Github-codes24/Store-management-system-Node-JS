@@ -4,8 +4,12 @@ import storeEmployeeProfileRoutes from './storeEmployee.profile.route.js';
 import storeProductRoutes from './storeProduct.routes.js';
 import storeCustomerRoutes from './storeCustomer.route.js';
 import storeEmployeeOfferRouter from './storeEmployee.offer.route.js';
+import storeEmployeeDashboardRouter from './storeEmployee.dashboard.route.js';
 
 const router = Router();
+
+// Store Employee Dashboard Routes (/api/store-employee/dashboard)
+router.use('/dashboard', storeEmployeeDashboardRouter);
 
 // Store Employee Auth Routes (/api/store-employee/auth)
 router.use('/auth', storeEmployeeAuthRoutes);
