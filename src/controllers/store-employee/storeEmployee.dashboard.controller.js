@@ -2,6 +2,7 @@ import Store from '../../models/store.model.js';
 import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
 import SellProduct from '../../models/sellProduct.model.js';
+import StoreOrder from '../../models/storeOrder.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { getPagination } from '../../utils/pagination.js';
 
@@ -34,16 +35,26 @@ export const getDashboardOverview = async (req, res, next) => {
       status: 'active',
     });
 
-    const totalOrders = await SellProduct.countDocuments({
+    const storeOrdersCount = await StoreOrder.countDocuments({
+      store: employeeStoreId,
+      isDeleted: { $ne: true },
+    });
+    const sellProductsCount = await SellProduct.countDocuments({
       store: employeeStoreId,
       isDeleted: false,
     });
+    const totalOrders = storeOrdersCount + sellProductsCount;
 
-    const revenueAggregate = await SellProduct.aggregate([
+    const storeOrderRevenueAgg = await StoreOrder.aggregate([
+      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
+      { $group: { _id: null, totalRevenue: { $sum: '$netAmount' } } },
+    ]);
+    const sellProductRevenueAgg = await SellProduct.aggregate([
       { $match: { store: employeeStoreId, isDeleted: false } },
       { $group: { _id: null, totalRevenue: { $sum: '$netAmount' } } },
     ]);
-    const totalRevenue = revenueAggregate.length > 0 ? revenueAggregate[0].totalRevenue : 0;
+    const totalRevenue =
+      (storeOrderRevenueAgg[0]?.totalRevenue || 0) + (sellProductRevenueAgg[0]?.totalRevenue || 0);
 
     // 3. Monthly Analytics Charts (This Year vs Last Year)
     const currentYear = new Date().getFullYear();
@@ -81,13 +92,44 @@ export const getDashboardOverview = async (req, res, next) => {
       }
     });
 
-    // Order & Revenue Growth Analytics
+    // Order & Revenue Growth Analytics (From both StoreOrder and SellProduct)
     const orderGrowthThisYear = Array(12).fill(0);
     const orderGrowthLastYear = Array(12).fill(0);
     const revenueGrowthThisYear = Array(12).fill(0);
     const revenueGrowthLastYear = Array(12).fill(0);
 
-    const salesAgg = await SellProduct.aggregate([
+    const storeOrderSalesAgg = await StoreOrder.aggregate([
+      {
+        $match: {
+          store: employeeStoreId,
+          isDeleted: { $ne: true },
+          createdAt: { $gte: new Date(`${previousYear}-01-01`), $lte: new Date(`${currentYear}-12-31T23:59:59.999Z`) },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
+          },
+          ordersCount: { $sum: 1 },
+          revenueSum: { $sum: '$netAmount' },
+        },
+      },
+    ]);
+
+    storeOrderSalesAgg.forEach((item) => {
+      const monthIdx = item._id.month - 1;
+      if (item._id.year === currentYear) {
+        orderGrowthThisYear[monthIdx] += item.ordersCount;
+        revenueGrowthThisYear[monthIdx] += item.revenueSum;
+      } else if (item._id.year === previousYear) {
+        orderGrowthLastYear[monthIdx] += item.ordersCount;
+        revenueGrowthLastYear[monthIdx] += item.revenueSum;
+      }
+    });
+
+    const sellProductSalesAgg = await SellProduct.aggregate([
       {
         $match: {
           store: employeeStoreId,
@@ -107,31 +149,49 @@ export const getDashboardOverview = async (req, res, next) => {
       },
     ]);
 
-    salesAgg.forEach((item) => {
+    sellProductSalesAgg.forEach((item) => {
       const monthIdx = item._id.month - 1;
       if (item._id.year === currentYear) {
-        orderGrowthThisYear[monthIdx] = item.ordersCount;
-        revenueGrowthThisYear[monthIdx] = item.revenueSum;
+        orderGrowthThisYear[monthIdx] += item.ordersCount;
+        revenueGrowthThisYear[monthIdx] += item.revenueSum;
       } else if (item._id.year === previousYear) {
-        orderGrowthLastYear[monthIdx] = item.ordersCount;
-        revenueGrowthLastYear[monthIdx] = item.revenueSum;
+        orderGrowthLastYear[monthIdx] += item.ordersCount;
+        revenueGrowthLastYear[monthIdx] += item.revenueSum;
       }
     });
 
     // 4. Preview Widgets (Top 5 items)
-    // Recent Orders (Top 5)
-    const recentOrdersRaw = await SellProduct.find({ store: employeeStoreId, isDeleted: false })
+    // Recent Orders (Fetch from both StoreOrder & SellProduct)
+    const storeOrdersRaw = await StoreOrder.find({ store: employeeStoreId, isDeleted: { $ne: true } })
+      .select('orderId netAmount createdAt')
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    const sellProductsRaw = await SellProduct.find({ store: employeeStoreId, isDeleted: false })
       .select('sellId netAmount billDate createdAt')
       .sort({ billDate: -1, createdAt: -1 })
       .limit(5);
 
-    const recentOrders = recentOrdersRaw.map((o) => ({
-      _id: o._id,
-      orderId: o.sellId,
-      amount: o.netAmount,
-      time: o.billDate ? o.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      date: o.billDate ? o.billDate.toISOString().split('T')[0] : '',
-    }));
+    const combinedRecentOrders = [
+      ...storeOrdersRaw.map((o) => ({
+        _id: o._id,
+        orderId: o.orderId,
+        amount: o.netAmount,
+        time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',
+        rawDate: o.createdAt,
+      })),
+      ...sellProductsRaw.map((o) => ({
+        _id: o._id,
+        orderId: o.sellId,
+        amount: o.netAmount,
+        time: o.billDate ? o.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: o.billDate ? o.billDate.toISOString().split('T')[0] : '',
+        rawDate: o.billDate || o.createdAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate))
+      .slice(0, 5);
 
     // Recent Customers (Top 5)
     const recentCustomersRaw = await Customer.find({
@@ -165,7 +225,7 @@ export const getDashboardOverview = async (req, res, next) => {
     const lowStockProducts = lowStockRaw.map((p) => ({
       _id: p._id,
       productName: p.productName,
-      quantity: p.unit ? p.unit.name : '1 Unit',
+      quantity: p.unit ? p.unit.name : 'piece',
       stock: p.stockQuantity,
     }));
 
@@ -196,8 +256,21 @@ export const getDashboardOverview = async (req, res, next) => {
       };
     });
 
-    // Most Demanding Products (Top 5 Best-Selling Products)
-    const topProductsAgg = await SellProduct.aggregate([
+    // Most Demanding Products (Top 5 Best-Selling Products from StoreOrder & SellProduct)
+    const storeOrderItemsAgg = await StoreOrder.aggregate([
+      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
+      { $unwind: '$bills' },
+      { $unwind: '$bills.items' },
+      {
+        $group: {
+          _id: '$bills.items.product',
+          productName: { $first: '$bills.items.productName' },
+          totalUnitsSold: { $sum: '$bills.items.quantity' },
+        },
+      },
+    ]);
+
+    const sellProductItemsAgg = await SellProduct.aggregate([
       { $match: { store: employeeStoreId, isDeleted: false } },
       { $unwind: '$items' },
       {
@@ -207,16 +280,35 @@ export const getDashboardOverview = async (req, res, next) => {
           totalUnitsSold: { $sum: '$items.quantity' },
         },
       },
-      { $sort: { totalUnitsSold: -1 } },
-      { $limit: 5 },
     ]);
 
-    const mostDemandingProducts = topProductsAgg.map((item) => ({
-      _id: item._id,
-      productName: item.productName || 'Product',
-      category: 'General',
-      totalUnitsSold: item.totalUnitsSold,
-    }));
+    const productSalesMap = {};
+
+    storeOrderItemsAgg.forEach((item) => {
+      const name = item.productName || 'Product';
+      if (!productSalesMap[name]) {
+        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
+      }
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+    });
+
+    sellProductItemsAgg.forEach((item) => {
+      const name = item.productName || 'Product';
+      if (!productSalesMap[name]) {
+        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
+      }
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+    });
+
+    const mostDemandingProducts = Object.values(productSalesMap)
+      .sort((a, b) => b.totalUnitsSold - a.totalUnitsSold)
+      .slice(0, 5)
+      .map((item) => ({
+        _id: item._id,
+        productName: item.productName,
+        category: 'General',
+        totalUnitsSold: item.totalUnitsSold,
+      }));
 
     return res.status(200).json(
       successResponse({
@@ -249,7 +341,7 @@ export const getDashboardOverview = async (req, res, next) => {
               lastYear: revenueGrowthLastYear,
             },
           },
-          recentOrders,
+          recentOrders: combinedRecentOrders,
           recentCustomers,
           lowStockProducts,
           expiringProducts,
@@ -263,37 +355,54 @@ export const getDashboardOverview = async (req, res, next) => {
 };
 
 /**
- * See All - Recent Orders (Paginated)
+ * See All - Recent Orders (Paginated from StoreOrder & SellProduct)
  */
 export const getSeeAllRecentOrders = async (req, res, next) => {
   try {
     const employeeStoreId = req.storeEmployee?.storeId;
     const { search, page = 1, limit = 10 } = req.query;
 
-    const filter = { store: employeeStoreId, isDeleted: false };
+    const storeOrderFilter = { store: employeeStoreId, isDeleted: { $ne: true } };
+    const sellProductFilter = { store: employeeStoreId, isDeleted: false };
 
     if (search) {
-      filter.sellId = { $regex: search.trim(), $options: 'i' };
+      const reg = { $regex: search.trim(), $options: 'i' };
+      storeOrderFilter.orderId = reg;
+      sellProductFilter.sellId = reg;
     }
 
-    const total = await SellProduct.countDocuments(filter);
+    const storeOrdersRaw = await StoreOrder.find(storeOrderFilter)
+      .select('orderId netAmount customer createdAt')
+      .sort({ createdAt: -1 });
+
+    const sellProductsRaw = await SellProduct.find(sellProductFilter)
+      .select('sellId netAmount billDate createdAt')
+      .sort({ billDate: -1, createdAt: -1 });
+
+    const combined = [
+      ...storeOrdersRaw.map((o) => ({
+        _id: o._id,
+        orderId: o.orderId,
+        amount: o.netAmount,
+        customerName: o.customer ? o.customer.name : 'Walk-in Customer',
+        time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',
+        rawDate: o.createdAt,
+      })),
+      ...sellProductsRaw.map((o) => ({
+        _id: o._id,
+        orderId: o.sellId,
+        amount: o.netAmount,
+        customerName: 'Walk-in Customer',
+        time: o.billDate ? o.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: o.billDate ? o.billDate.toISOString().split('T')[0] : '',
+        rawDate: o.billDate || o.createdAt,
+      })),
+    ].sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate));
+
+    const total = combined.length;
     const pagination = getPagination({ page, limit, total });
-
-    const ordersRaw = await SellProduct.find(filter)
-      .select('sellId netAmount grossAmount billDate paymentStatus createdAt')
-      .sort({ billDate: -1, createdAt: -1 })
-      .skip(pagination.skip)
-      .limit(pagination.limit);
-
-    const orders = ordersRaw.map((o) => ({
-      _id: o._id,
-      orderId: o.sellId,
-      amount: o.netAmount,
-      grossAmount: o.grossAmount,
-      paymentStatus: o.paymentStatus,
-      time: o.billDate ? o.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      date: o.billDate ? o.billDate.toISOString().split('T')[0] : '',
-    }));
+    const orders = combined.slice(pagination.skip, pagination.skip + pagination.limit);
 
     return res.status(200).json(
       successResponse({
@@ -397,7 +506,7 @@ export const getSeeAllLowStockProducts = async (req, res, next) => {
       _id: p._id,
       productName: p.productName,
       category: p.category ? p.category.name : 'General',
-      quantity: p.unit ? p.unit.name : '1 Unit',
+      quantity: p.unit ? p.unit.name : 'piece',
       stock: p.stockQuantity,
       alertQuantity: p.alertQuantity || Number(threshold),
     }));
@@ -479,7 +588,20 @@ export const getSeeAllMostDemandingProducts = async (req, res, next) => {
     const employeeStoreId = req.storeEmployee?.storeId;
     const { page = 1, limit = 10 } = req.query;
 
-    const pipeline = [
+    const storeOrderItemsAgg = await StoreOrder.aggregate([
+      { $match: { store: employeeStoreId, isDeleted: { $ne: true } } },
+      { $unwind: '$bills' },
+      { $unwind: '$bills.items' },
+      {
+        $group: {
+          _id: '$bills.items.product',
+          productName: { $first: '$bills.items.productName' },
+          totalUnitsSold: { $sum: '$bills.items.quantity' },
+        },
+      },
+    ]);
+
+    const sellProductItemsAgg = await SellProduct.aggregate([
       { $match: { store: employeeStoreId, isDeleted: false } },
       { $unwind: '$items' },
       {
@@ -489,18 +611,35 @@ export const getSeeAllMostDemandingProducts = async (req, res, next) => {
           totalUnitsSold: { $sum: '$items.quantity' },
         },
       },
-      { $sort: { totalUnitsSold: -1 } },
-    ];
+    ]);
 
-    const allAgg = await SellProduct.aggregate(pipeline);
-    const total = allAgg.length;
+    const productSalesMap = {};
+
+    storeOrderItemsAgg.forEach((item) => {
+      const name = item.productName || 'Product';
+      if (!productSalesMap[name]) {
+        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
+      }
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+    });
+
+    sellProductItemsAgg.forEach((item) => {
+      const name = item.productName || 'Product';
+      if (!productSalesMap[name]) {
+        productSalesMap[name] = { _id: item._id, productName: name, totalUnitsSold: 0 };
+      }
+      productSalesMap[name].totalUnitsSold += item.totalUnitsSold;
+    });
+
+    const sortedProducts = Object.values(productSalesMap).sort((a, b) => b.totalUnitsSold - a.totalUnitsSold);
+
+    const total = sortedProducts.length;
     const pagination = getPagination({ page, limit, total });
-
-    const paginatedItems = allAgg.slice(pagination.skip, pagination.skip + pagination.limit);
+    const paginatedItems = sortedProducts.slice(pagination.skip, pagination.skip + pagination.limit);
 
     const products = paginatedItems.map((item) => ({
       _id: item._id,
-      productName: item.productName || 'Product',
+      productName: item.productName,
       category: 'General',
       totalUnitsSold: item.totalUnitsSold,
     }));
