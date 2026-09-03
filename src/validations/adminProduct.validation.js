@@ -6,6 +6,7 @@ export const createAdminProductSchema = {
   body: z.object({
     barcode: z.string().trim().optional().nullable().or(z.literal('')),
     productImage: z.string().optional().nullable(),
+    image: z.string().optional().nullable(),
     productName: z
       .string({ required_error: 'Product name is required' })
       .trim()

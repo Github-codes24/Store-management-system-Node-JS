@@ -52,7 +52,12 @@ export const processUploadedFile = async (file, fallbackUrl = null, req = null) 
     }
   }
 
-  if (typeof fallbackUrl === 'string' && fallbackUrl.trim().length > 0 && !fallbackUrl.startsWith('data:')) {
+  if (
+    typeof fallbackUrl === 'string' &&
+    fallbackUrl.trim().length > 0 &&
+    !fallbackUrl.startsWith('data:') &&
+    !fallbackUrl.startsWith('blob:')
+  ) {
     return fallbackUrl.trim();
   }
 

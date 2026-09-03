@@ -23,11 +23,20 @@ const router = Router();
 // Apply admin authentication to all product routes
 router.use(adminAuth);
 
+// Helper to bridge single file reference
+const setSingleFile = (req, _res, next) => {
+  if (req.files && req.files.length > 0) {
+    req.file = req.files[0];
+  }
+  next();
+};
+
 router.get('/dropdown', getAdminProductDropdown);
 router.get('/barcode/:barcode', lookupByBarcode);
 router.post(
   '/',
-  upload.single('productImage'),
+  upload.any(),
+  setSingleFile,
   parseForm,
   validate(createAdminProductSchema),
   createAdminProduct
@@ -36,7 +45,8 @@ router.get('/', validate(getAdminProductsQuerySchema), getAdminProducts);
 router.get('/:id', getAdminProductById);
 router.put(
   '/:id',
-  upload.single('productImage'),
+  upload.any(),
+  setSingleFile,
   parseForm,
   validate(updateAdminProductSchema),
   updateAdminProduct

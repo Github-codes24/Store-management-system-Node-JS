@@ -6,7 +6,7 @@ import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
 
 export const createAdminProduct = async (req, res) => {
-  let { barcode, productImage, ...productData } = req.body;
+  let { barcode, productImage, image, ...productData } = req.body;
 
   let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
   if (finalBarcode !== '') {
@@ -35,7 +35,8 @@ export const createAdminProduct = async (req, res) => {
     }
   }
 
-  const imageUrl = await processUploadedFile(req.file, productImage, req);
+  const rawImage = productImage || image || null;
+  const imageUrl = await processUploadedFile(req.file, rawImage, req);
 
   const product = await AdminProduct.create({
     ...productData,
@@ -172,7 +173,7 @@ export const getAdminProductById = async (req, res) => {
 
 export const updateAdminProduct = async (req, res) => {
   const { id } = req.params;
-  const { productImage, ...updateData } = req.body;
+  const { productImage, image, ...updateData } = req.body;
 
   const product = await AdminProduct.findOne({ _id: id, isDeleted: false });
   if (!product) {
@@ -191,9 +192,12 @@ export const updateAdminProduct = async (req, res) => {
     }
   }
 
-  const newImageUrl = await processUploadedFile(req.file, productImage, req);
-  if (newImageUrl) {
-    updateData.productImage = newImageUrl;
+  const rawImage = productImage !== undefined ? productImage : image;
+  if (req.file || rawImage !== undefined) {
+    const newImageUrl = await processUploadedFile(req.file, rawImage, req);
+    if (newImageUrl !== null || rawImage === null || rawImage === '') {
+      updateData.productImage = newImageUrl;
+    }
   }
 
   const updatedProduct = await AdminProduct.findByIdAndUpdate(

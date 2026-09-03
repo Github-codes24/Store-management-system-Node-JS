@@ -129,7 +129,12 @@ export const createProductPurchase = async (req, res) => {
         manufactureDate: item.manufactureDate ? new Date(item.manufactureDate) : null,
         expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
         hsnCode: item.hsnCode || null,
-        productImage: item.productImage || null,
+        productImage:
+          typeof (item.productImage || item.image) === 'string' &&
+          !(item.productImage || item.image).startsWith('blob:') &&
+          !(item.productImage || item.image).startsWith('data:')
+            ? (item.productImage || item.image).trim()
+            : null,
       });
     }
 

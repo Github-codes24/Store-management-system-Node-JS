@@ -13,7 +13,8 @@ export const createBrand = async (req, res, next) => {
       return next(conflict('Brand with this name already exists'));
     }
 
-    const logo = await processUploadedFile(req.file, req.body.logo, req);
+    const rawLogo = req.body.logo || req.body.image || null;
+    const logo = await processUploadedFile(req.file, rawLogo, req);
 
     const brand = await Brand.create({
       name: name.trim(),
@@ -108,8 +109,9 @@ export const updateBrand = async (req, res, next) => {
     if (description !== undefined) brand.description = description;
     if (status !== undefined) brand.status = status;
 
-    const newLogo = await processUploadedFile(req.file, req.body.logo, req);
-    if (newLogo) {
+    const rawLogo = req.body.logo !== undefined ? req.body.logo : req.body.image;
+    if (req.file || rawLogo !== undefined) {
+      const newLogo = await processUploadedFile(req.file, rawLogo, req);
       brand.logo = newLogo;
     }
 

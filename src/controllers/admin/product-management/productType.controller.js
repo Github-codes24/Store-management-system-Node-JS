@@ -109,8 +109,8 @@ export const updateProductType = async (req, res, next) => {
     if (description !== undefined) productType.description = description;
     if (status !== undefined) productType.status = status;
 
-    const newImage = await processUploadedFile(req.file, req.body.image, req);
-    if (newImage) {
+    if (req.file || req.body.image !== undefined) {
+      const newImage = await processUploadedFile(req.file, req.body.image, req);
       productType.image = newImage;
     }
 

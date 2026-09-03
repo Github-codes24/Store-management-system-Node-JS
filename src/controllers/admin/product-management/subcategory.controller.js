@@ -172,8 +172,8 @@ export const updateSubcategory = async (req, res, next) => {
     if (description !== undefined) subcategory.description = description;
     if (status !== undefined) subcategory.status = status;
 
-    const newImage = await processUploadedFile(req.file, req.body.image, req);
-    if (newImage) {
+    if (req.file || req.body.image !== undefined) {
+      const newImage = await processUploadedFile(req.file, req.body.image, req);
       subcategory.image = newImage;
     }
 
