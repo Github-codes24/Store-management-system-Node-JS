@@ -13,6 +13,7 @@ import retailerRouter from './retailer.route.js';
 import settingsRouter from './settings.routes.js';
 import uploadRoutes from './upload.routes.js';
 import offersAndTaxManagementRoutes from './offers-and-tax-management/index.js';
+import adminStoreProductRoutes from './adminStoreProduct.routes.js';
 
 const router = Router();
 
@@ -31,6 +32,10 @@ router.use('/offers-and-tax-management', offersAndTaxManagementRoutes);
 
 // Admin Product Master Catalog Routes
 router.use('/products', adminProductRoutes);
+
+// Store Products Admin Routes (both endpoints supported)
+router.use('/store-products', adminStoreProductRoutes);
+router.use('/stores/products', adminStoreProductRoutes);
 
 // Product Stock Warehouse Management Routes
 router.use('/product-stocks', productStockRoutes);
