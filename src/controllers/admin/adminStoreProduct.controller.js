@@ -34,117 +34,6 @@ const computeDisplayStatus = (item) => {
 };
 
 /**
- * Auto-seed sample store products if a store has no products yet
- */
-const ensureSampleStoreProducts = async (storeId) => {
-  if (!storeId) return;
-
-  const count = await StoreProduct.countDocuments({
-    $or: [{ storeId }, { store: storeId }],
-    isDeleted: false,
-  });
-
-  if (count === 0) {
-    // Find or create default master entries
-    let brand = await Brand.findOne({ isDeleted: false });
-    if (!brand) brand = await Brand.create({ name: 'RARE RABBIT' });
-
-    let pType = await ProductType.findOne({ isDeleted: false });
-    if (!pType) pType = await ProductType.create({ name: 'Fashion' });
-
-    let cat = await Category.findOne({ isDeleted: false });
-    if (!cat) cat = await Category.create({ name: "Men's Fashion", productType: pType._id });
-
-    let subcat = await Subcategory.findOne({ isDeleted: false });
-    if (!subcat) subcat = await Subcategory.create({ name: 'T-Shirts', category: cat._id });
-
-    let unit = await Unit.findOne({ isDeleted: false });
-    if (!unit) unit = await Unit.create({ name: 'Piece', shortName: 'pc' });
-
-    const sampleProducts = [
-      {
-        productName: 'Toxy Men Printed Raw Edge T-shirt',
-        barcode: '717271883927',
-        brand: brand._id,
-        productType: pType._id,
-        category: cat._id,
-        subcategory: subcat._id,
-        unit: unit._id,
-        mrp: 799,
-        onlineSellingPrice: 699,
-        offlineSellingPrice: 649,
-        purchasePrice: 500,
-        stockQuantity: 200,
-        alertQuantity: 15,
-        status: 'active',
-        batch: 'B240701A',
-        storeId,
-        productImage: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500&h=500&fit=crop',
-      },
-      {
-        productName: 'Egg (Farm Fresh)',
-        barcode: '717271883928',
-        brand: brand._id,
-        productType: pType._id,
-        category: cat._id,
-        subcategory: subcat._id,
-        unit: unit._id,
-        mrp: 120,
-        onlineSellingPrice: 120,
-        offlineSellingPrice: 120,
-        purchasePrice: 90,
-        stockQuantity: 5,
-        alertQuantity: 10,
-        status: 'active',
-        batch: 'B240701B',
-        storeId,
-        productImage: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=500&h=500&fit=crop',
-      },
-      {
-        productName: 'Fresh Apple Royal Gala',
-        barcode: '717271883929',
-        brand: brand._id,
-        productType: pType._id,
-        category: cat._id,
-        subcategory: subcat._id,
-        unit: unit._id,
-        mrp: 180,
-        onlineSellingPrice: 160,
-        offlineSellingPrice: 150,
-        purchasePrice: 120,
-        stockQuantity: 50,
-        alertQuantity: 10,
-        status: 'active',
-        batch: 'B240701C',
-        storeId,
-        productImage: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=500&h=500&fit=crop',
-      },
-      {
-        productName: 'Papaya Premium',
-        barcode: '717271883930',
-        brand: brand._id,
-        productType: pType._id,
-        category: cat._id,
-        subcategory: subcat._id,
-        unit: unit._id,
-        mrp: 90,
-        onlineSellingPrice: 80,
-        offlineSellingPrice: 75,
-        purchasePrice: 50,
-        stockQuantity: 4,
-        alertQuantity: 10,
-        status: 'active',
-        batch: 'B240701D',
-        storeId,
-        productImage: 'https://images.unsplash.com/photo-1617112848923-cc2234396a8d?w=500&h=500&fit=crop',
-      },
-    ];
-
-    await StoreProduct.insertMany(sampleProducts);
-  }
-};
-
-/**
  * 1. Get Store Products for Admin Panel
  */
 export const getAdminStoreProducts = async (req, res, next) => {
@@ -169,7 +58,7 @@ export const getAdminStoreProducts = async (req, res, next) => {
 
     // Store Filter
     let targetStoreId = storeId || store;
-    if (targetStoreId) {
+    if (targetStoreId && targetStoreId.trim() !== '') {
       // If store is name, find by name
       if (typeof targetStoreId === 'string' && targetStoreId.length !== 24) {
         const foundStore = await Store.findOne({
@@ -181,19 +70,10 @@ export const getAdminStoreProducts = async (req, res, next) => {
         }
       }
 
-      if (targetStoreId) {
-        filter.$or = [
-          { storeId: targetStoreId },
-          { store: targetStoreId },
-        ];
-        await ensureSampleStoreProducts(targetStoreId);
-      }
-    } else {
-      // If no store filter specified, pick the first active store
-      const defaultStore = await Store.findOne({ isDeleted: false });
-      if (defaultStore) {
-        await ensureSampleStoreProducts(defaultStore._id);
-      }
+      filter.$or = [
+        { storeId: targetStoreId },
+        { store: targetStoreId },
+      ];
     }
 
     // Search filter
