@@ -7,11 +7,15 @@ import storeCustomerRoutes from './storeCustomer.route.js';
 import storeEmployeeOfferRouter from './storeEmployee.offer.route.js';
 import storeReportRoutes from './storeReport.routes.js';
 import storeEmployeeDashboardRouter from './storeEmployee.dashboard.route.js';
+import storeNotificationRoutes from './storeNotification.route.js';
 
 const router = Router();
 
 // Store Employee Dashboard Routes (/api/store-employee/dashboard)
 router.use('/dashboard', storeEmployeeDashboardRouter);
+
+// Store Employee Notification Routes (/api/store-employee/notifications)
+router.use('/notifications', storeNotificationRoutes);
 
 // Store Employee Auth Routes (/api/store-employee/auth)
 router.use('/auth', storeEmployeeAuthRoutes);
