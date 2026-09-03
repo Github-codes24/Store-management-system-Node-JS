@@ -217,13 +217,21 @@ export const deleteImage = async (req, res, next) => {
     const isS3Configured = Boolean(env.S3_BUCKET && env.S3_ACCESS_KEY && env.S3_SECRET_KEY);
 
     // 1. Check if S3 URL or S3 key
-    if (cleanUrl.includes('amazonaws.com') || cleanUrl.startsWith('uploads/')) {
+    if (
+      cleanUrl.includes('amazonaws.com') ||
+      cleanUrl.includes('aces3.ai') ||
+      (env.S3_ENDPOINT && cleanUrl.includes(env.S3_ENDPOINT.replace(/^https?:\/\//, ''))) ||
+      cleanUrl.startsWith('uploads/') ||
+      cleanUrl.includes('/uploads/')
+    ) {
       if (!isS3Configured) {
         return next(badRequest('S3 storage is not configured to delete this S3 file'));
       }
 
       let s3Key = cleanUrl;
-      if (cleanUrl.includes('.com/')) {
+      if (cleanUrl.includes('/uploads/')) {
+        s3Key = `uploads/${cleanUrl.split('/uploads/')[1]}`;
+      } else if (cleanUrl.includes('.com/')) {
         s3Key = cleanUrl.split('.com/')[1];
       }
 
