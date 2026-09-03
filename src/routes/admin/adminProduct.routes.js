@@ -27,7 +27,7 @@ router.get('/dropdown', getAdminProductDropdown);
 router.get('/barcode/:barcode', lookupByBarcode);
 router.post(
   '/',
-  upload.single('productImage'),
+  upload.any(),
   parseForm,
   validate(createAdminProductSchema),
   createAdminProduct
@@ -36,7 +36,7 @@ router.get('/', validate(getAdminProductsQuerySchema), getAdminProducts);
 router.get('/:id', getAdminProductById);
 router.put(
   '/:id',
-  upload.single('productImage'),
+  upload.any(),
   parseForm,
   validate(updateAdminProductSchema),
   updateAdminProduct

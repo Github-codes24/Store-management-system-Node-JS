@@ -26,13 +26,13 @@ router.get('/dropdown', getBrandDropdown);
 
 router
   .route('/')
-  .post(upload.single('logo'), parseForm, validate(createBrandSchema), createBrand)
+  .post(upload.any(), parseForm, validate(createBrandSchema), createBrand)
   .get(getBrands);
 
 router
   .route('/:id')
   .get(getBrandById)
-  .put(upload.single('logo'), parseForm, validate(updateBrandSchema), updateBrand)
+  .put(upload.any(), parseForm, validate(updateBrandSchema), updateBrand)
   .delete(deleteBrand);
 
 router.patch('/:id/status', validate(toggleStatusSchema), toggleBrandStatus);

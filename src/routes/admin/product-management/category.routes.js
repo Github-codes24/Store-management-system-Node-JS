@@ -28,13 +28,13 @@ router.get('/by-product-type/:productTypeId', getCategoriesByProductType);
 
 router
   .route('/')
-  .post(upload.single('image'), parseForm, validate(createCategorySchema), createCategory)
+  .post(upload.any(), parseForm, validate(createCategorySchema), createCategory)
   .get(getCategories);
 
 router
   .route('/:id')
   .get(getCategoryById)
-  .put(upload.single('image'), parseForm, validate(updateCategorySchema), updateCategory)
+  .put(upload.any(), parseForm, validate(updateCategorySchema), updateCategory)
   .delete(deleteCategory);
 
 router.patch('/:id/status', validate(toggleStatusSchema), toggleCategoryStatus);

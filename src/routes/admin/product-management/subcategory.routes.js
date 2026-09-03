@@ -28,13 +28,13 @@ router.get('/by-category/:categoryId', getSubcategoriesByCategory);
 
 router
   .route('/')
-  .post(upload.single('image'), parseForm, validate(createSubcategorySchema), createSubcategory)
+  .post(upload.any(), parseForm, validate(createSubcategorySchema), createSubcategory)
   .get(getSubcategories);
 
 router
   .route('/:id')
   .get(getSubcategoryById)
-  .put(upload.single('image'), parseForm, validate(updateSubcategorySchema), updateSubcategory)
+  .put(upload.any(), parseForm, validate(updateSubcategorySchema), updateSubcategory)
   .delete(deleteSubcategory);
 
 router.patch('/:id/status', validate(toggleStatusSchema), toggleSubcategoryStatus);
