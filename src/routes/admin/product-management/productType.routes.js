@@ -26,13 +26,13 @@ router.get('/dropdown', getProductTypeDropdown);
 
 router
   .route('/')
-  .post(upload.single('image'), parseForm, validate(createProductTypeSchema), createProductType)
+  .post(upload.any(), parseForm, validate(createProductTypeSchema), createProductType)
   .get(getProductTypes);
 
 router
   .route('/:id')
   .get(getProductTypeById)
-  .put(upload.single('image'), parseForm, validate(updateProductTypeSchema), updateProductType)
+  .put(upload.any(), parseForm, validate(updateProductTypeSchema), updateProductType)
   .delete(deleteProductType);
 
 router.patch('/:id/status', validate(toggleStatusSchema), toggleProductTypeStatus);

@@ -30,8 +30,8 @@ router.get('/barcode/:barcode', lookupStoreProductBarcode);
 // CRUD
 router.get('/', getStoreProducts);
 router.get('/:id', getStoreProductById);
-router.post('/', upload.single('productImage'), parseForm, createStoreProduct);
-router.put('/:id', upload.single('productImage'), parseForm, updateStoreProduct);
+router.post('/', upload.any(), parseForm, createStoreProduct);
+router.put('/:id', upload.any(), parseForm, updateStoreProduct);
 router.patch('/:id/status', toggleStoreProductStatus);
 router.delete('/:id', deleteStoreProduct);
 
