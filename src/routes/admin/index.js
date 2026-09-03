@@ -14,11 +14,23 @@ import settingsRouter from './settings.routes.js';
 import uploadRoutes from './upload.routes.js';
 import offersAndTaxManagementRoutes from './offers-and-tax-management/index.js';
 import adminStoreProductRoutes from './adminStoreProduct.routes.js';
+import adminOrderRoutes from './adminOrder.routes.js';
 
 const router = Router();
 
 // Admin Auth Routes
 router.use('/auth', adminAuthRoutes);
+
+// Order Management Admin Routes (Offline Sales & Online Orders)
+router.use('/orders', adminOrderRoutes);
+router.use('/offline-sales', (req, res, next) => {
+  req.url = '/offline' + (req.url === '/' ? '' : req.url);
+  return adminOrderRoutes(req, res, next);
+});
+router.use('/online-orders', (req, res, next) => {
+  req.url = '/online' + (req.url === '/' ? '' : req.url);
+  return adminOrderRoutes(req, res, next);
+});
 
 // Image & File Upload / Delete Routes
 router.use('/upload', uploadRoutes);
