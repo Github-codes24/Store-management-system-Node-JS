@@ -16,10 +16,16 @@ import offersAndTaxManagementRoutes from './offers-and-tax-management/index.js';
 import adminStoreProductRoutes from './adminStoreProduct.routes.js';
 import adminOrderRoutes from './adminOrder.routes.js';
 
+import adminReportRoutes from './adminReport.routes.js';
+
 const router = Router();
 
 // Admin Auth Routes
 router.use('/auth', adminAuthRoutes);
+
+// Admin Reports Module Routes
+router.use('/reports', adminReportRoutes);
+
 
 // Order Management Admin Routes (Offline Sales & Online Orders)
 router.use('/orders', adminOrderRoutes);
