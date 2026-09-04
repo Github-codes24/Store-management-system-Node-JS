@@ -15,10 +15,14 @@ import uploadRoutes from './upload.routes.js';
 import offersAndTaxManagementRoutes from './offers-and-tax-management/index.js';
 import adminStoreProductRoutes from './adminStoreProduct.routes.js';
 import adminOrderRoutes from './adminOrder.routes.js';
+import adminDashboardRoutes from './adminDashboard.routes.js';
 
 import adminReportRoutes from './adminReport.routes.js';
 
 const router = Router();
+
+// Admin Dashboard Routes
+router.use('/dashboard', adminDashboardRoutes);
 
 // Admin Auth Routes
 router.use('/auth', adminAuthRoutes);
