@@ -18,6 +18,7 @@ import adminOrderRoutes from './adminOrder.routes.js';
 import adminDashboardRoutes from './adminDashboard.routes.js';
 
 import adminReportRoutes from './adminReport.routes.js';
+import adminNotificationRoutes from './adminNotification.routes.js';
 
 const router = Router();
 
@@ -29,6 +30,10 @@ router.use('/auth', adminAuthRoutes);
 
 // Admin Reports Module Routes
 router.use('/reports', adminReportRoutes);
+
+// Admin Notifications Module Routes
+router.use('/notifications', adminNotificationRoutes);
+
 
 
 // Order Management Admin Routes (Offline Sales & Online Orders)
