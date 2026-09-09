@@ -25,12 +25,13 @@ const formatCurrency = (value) => {
 };
 
 /**
- * Format time to human readable HH:MM AM/PM
+ * Format time to human readable HH:MM AM/PM in IST (Asia/Kolkata)
  */
 const formatTime = (date) => {
   if (!date) return '';
   const d = new Date(date);
-  return d.toLocaleTimeString('en-US', {
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
@@ -287,7 +288,7 @@ const fetchActivitiesData = async (limit = 10) => {
     activities.push({
       id: `notif-${n._id}`,
       time: formatTime(n.createdAt),
-      activity: n.message || n.title,
+      activity: n.title || n.message,
       type: n.type || 'notification',
       timestamp: n.createdAt,
     });
@@ -295,13 +296,13 @@ const fetchActivitiesData = async (limit = 10) => {
 
   // 2. Map customer / store orders
   recentOrders.forEach((o) => {
-    const custName = o.customer?.name || 'Customer';
+    const custName = o.customer?.name ? o.customer.name.split(' ')[0] : 'Customer';
     const net = o.totalOrderNet || o.netAmount || 0;
     const amountStr = net > 0 ? ` (${formatCurrency(net)})` : '';
     activities.push({
       id: `order-${o._id}`,
       time: formatTime(o.createdAt),
-      activity: `Order #${o.orderId || o._id} placed by ${custName}${amountStr}`,
+      activity: `Order #${o.orderId || o._id} - ${custName}${amountStr}`,
       type: 'order',
       timestamp: o.createdAt,
     });
@@ -314,7 +315,7 @@ const fetchActivitiesData = async (limit = 10) => {
     activities.push({
       id: `sale-${s._id}`,
       time: formatTime(s.createdAt),
-      activity: `POS Sale #${s.sellId} completed at ${storeOrRetailer}${amountStr}`,
+      activity: `POS Sale #${s.sellId} - ${storeOrRetailer}${amountStr}`,
       type: 'sale',
       timestamp: s.createdAt,
     });
@@ -322,12 +323,11 @@ const fetchActivitiesData = async (limit = 10) => {
 
   // 4. Map Distributor Purchases
   recentPurchases.forEach((p) => {
-    const distName = p.distributor?.name || 'Distributor';
     const amountStr = p.netAmount ? ` (${formatCurrency(p.netAmount)})` : '';
     activities.push({
       id: `purchase-${p._id}`,
       time: formatTime(p.createdAt),
-      activity: `Purchase Invoice #${p.purchaseId} recorded from ${distName}${amountStr}`,
+      activity: `Purchase #${p.purchaseId}${amountStr}`,
       type: 'purchase',
       timestamp: p.createdAt,
     });
@@ -338,7 +338,7 @@ const fetchActivitiesData = async (limit = 10) => {
     activities.push({
       id: `cust-${c._id}`,
       time: formatTime(c.createdAt),
-      activity: `New customer '${c.name || 'Customer'}' (${c.phone || ''}) registered`,
+      activity: `Customer '${c.name || 'Customer'}' registered`,
       type: 'customer',
       timestamp: c.createdAt,
     });
@@ -349,7 +349,7 @@ const fetchActivitiesData = async (limit = 10) => {
     activities.push({
       id: `prod-${p._id}`,
       time: formatTime(p.createdAt),
-      activity: `Product '${p.productName}' added to Master Inventory`,
+      activity: `Product '${p.productName}' added`,
       type: 'product',
       timestamp: p.createdAt,
     });
@@ -360,6 +360,7 @@ const fetchActivitiesData = async (limit = 10) => {
 
   return activities.slice(0, limit);
 };
+
 
 
 /**
