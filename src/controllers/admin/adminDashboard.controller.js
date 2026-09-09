@@ -4,6 +4,7 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
 import StoreOrder from '../../models/storeOrder.model.js';
 import SellProduct from '../../models/sellProduct.model.js';
+import ProductPurchaseInvoice from '../../models/productPurchaseInvoice.model.js';
 import Notification from '../../models/notification.model.js';
 import { successResponse } from '../../utils/api-response.js';
 
@@ -237,23 +238,51 @@ const fetchChartsData = async () => {
 };
 
 /**
- * Fetch recent activity feed from notifications and orders
+ * Fetch real live recent activity feed from actual database models
  */
 const fetchActivitiesData = async (limit = 10) => {
-  const [recentNotifications, recentOrders] = await Promise.all([
-    Notification.find({ isDeleted: { $ne: true } })
+  const [
+    recentNotifications,
+    recentOrders,
+    recentSales,
+    recentPurchases,
+    recentCustomers,
+    recentProducts,
+  ] = await Promise.all([
+    Notification.find({ isDeleted: { $ne: true }, recipientType: 'Admin' })
       .sort({ createdAt: -1 })
       .limit(limit)
       .select('title message type createdAt'),
     StoreOrder.find({ orderStatus: { $ne: 'Cancelled' } })
       .sort({ createdAt: -1 })
       .limit(limit)
-      .select('orderId customer totalOrderNet createdAt'),
+      .populate('customer', 'name phone')
+      .populate('store', 'name')
+      .select('orderId customer store totalOrderNet netAmount createdAt'),
+    SellProduct.find({ isDeleted: false, status: { $ne: 'Cancelled' } })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('store', 'name')
+      .populate('retailer', 'name')
+      .select('sellId saleType store retailer netAmount createdAt'),
+    ProductPurchaseInvoice.find({ isDeleted: false })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('distributor', 'name')
+      .select('purchaseId distributor netAmount createdAt'),
+    Customer.find()
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('name phone createdAt'),
+    AdminProduct.find({ isDeleted: false })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select('productName createdAt'),
   ]);
 
   const activities = [];
 
-  // Map notifications
+  // 1. Map real notifications
   recentNotifications.forEach((n) => {
     activities.push({
       id: `notif-${n._id}`,
@@ -264,24 +293,74 @@ const fetchActivitiesData = async (limit = 10) => {
     });
   });
 
-  // Map orders
+  // 2. Map customer / store orders
   recentOrders.forEach((o) => {
-    const custName = o.customer?.name || 'Walk-in Customer';
-    const amount = o.totalOrderNet ? ` (${formatCurrency(o.totalOrderNet)})` : '';
+    const custName = o.customer?.name || 'Customer';
+    const net = o.totalOrderNet || o.netAmount || 0;
+    const amountStr = net > 0 ? ` (${formatCurrency(net)})` : '';
     activities.push({
       id: `order-${o._id}`,
       time: formatTime(o.createdAt),
-      activity: `Order #${o.orderId} placed by ${custName}${amount}`,
+      activity: `Order #${o.orderId || o._id} placed by ${custName}${amountStr}`,
       type: 'order',
       timestamp: o.createdAt,
     });
   });
 
-  // Sort unified activities chronologically descending
+  // 3. Map POS Sales
+  recentSales.forEach((s) => {
+    const storeOrRetailer = s.saleType === 'Own Store' ? s.store?.name || 'Store' : s.retailer?.name || 'Retailer';
+    const amountStr = s.netAmount ? ` (${formatCurrency(s.netAmount)})` : '';
+    activities.push({
+      id: `sale-${s._id}`,
+      time: formatTime(s.createdAt),
+      activity: `POS Sale #${s.sellId} completed at ${storeOrRetailer}${amountStr}`,
+      type: 'sale',
+      timestamp: s.createdAt,
+    });
+  });
+
+  // 4. Map Distributor Purchases
+  recentPurchases.forEach((p) => {
+    const distName = p.distributor?.name || 'Distributor';
+    const amountStr = p.netAmount ? ` (${formatCurrency(p.netAmount)})` : '';
+    activities.push({
+      id: `purchase-${p._id}`,
+      time: formatTime(p.createdAt),
+      activity: `Purchase Invoice #${p.purchaseId} recorded from ${distName}${amountStr}`,
+      type: 'purchase',
+      timestamp: p.createdAt,
+    });
+  });
+
+  // 5. Map Customer Registrations
+  recentCustomers.forEach((c) => {
+    activities.push({
+      id: `cust-${c._id}`,
+      time: formatTime(c.createdAt),
+      activity: `New customer '${c.name || 'Customer'}' (${c.phone || ''}) registered`,
+      type: 'customer',
+      timestamp: c.createdAt,
+    });
+  });
+
+  // 6. Map Master Products Added
+  recentProducts.forEach((p) => {
+    activities.push({
+      id: `prod-${p._id}`,
+      time: formatTime(p.createdAt),
+      activity: `Product '${p.productName}' added to Master Inventory`,
+      type: 'product',
+      timestamp: p.createdAt,
+    });
+  });
+
+  // Sort all real activities chronologically descending
   activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   return activities.slice(0, limit);
 };
+
 
 /**
  * Combined Admin Dashboard Overview

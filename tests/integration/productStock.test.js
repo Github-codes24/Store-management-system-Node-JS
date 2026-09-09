@@ -18,8 +18,9 @@ let testSubcategory;
 let testBrand;
 let testUnit;
 
+jest.setTimeout(60000);
+
 beforeAll(async () => {
-  jest.setTimeout(60000);
   mongoServer = await MongoMemoryServer.create();
   const uri = mongoServer.getUri();
   await mongoose.connect(uri);
@@ -32,7 +33,7 @@ beforeAll(async () => {
     role: 'superadmin',
   });
   adminToken = adminRes.body.data.token;
-});
+}, 60000);
 
 afterAll(async () => {
   await mongoose.disconnect();

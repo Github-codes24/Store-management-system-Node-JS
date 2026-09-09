@@ -41,6 +41,9 @@ const env = {
   STORE_EMPLOYEE_JWT_SECRET: required('STORE_EMPLOYEE_JWT_SECRET', isDev ? 'store-employee-dev-secret-key-change-in-prod' : null),
   STORE_EMPLOYEE_JWT_EXPIRES_IN: process.env.STORE_EMPLOYEE_JWT_EXPIRES_IN || '7d',
 
+  CUSTOMER_JWT_SECRET: required('CUSTOMER_JWT_SECRET', isDev ? 'customer-dev-secret-key-change-in-prod' : null),
+  CUSTOMER_JWT_EXPIRES_IN: process.env.CUSTOMER_JWT_EXPIRES_IN || '30d',
+
   // CORS
   ALLOWED_ORIGINS: process.env?.ALLOWED_ORIGINS,
 

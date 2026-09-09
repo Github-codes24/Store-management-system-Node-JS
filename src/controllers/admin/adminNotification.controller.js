@@ -37,7 +37,7 @@ const syncAdminNotifications = async () => {
   const count = await Notification.countDocuments({ recipientType: 'Admin', isDeleted: false });
   if (count === 0) {
     const firstStore = await Store.findOne({ isDeleted: false }).lean();
-    const storeName = firstStore ? firstStore.name : 'Maruti Mart';
+    const storeName = firstStore ? firstStore.name : 'Main Store';
 
     const whLowStock = await AdminProduct.countDocuments({
       isDeleted: false,
@@ -49,57 +49,47 @@ const syncAdminNotifications = async () => {
       $expr: { $lte: ['$stockQuantity', { $ifNull: ['$minStockAlert', 10] }] },
     });
 
-    const whLowCount = whLowStock > 0 ? whLowStock : 10;
-    const storeLowCount = storeLowStock > 0 ? storeLowStock : 10;
+    const whLowCount = whLowStock > 0 ? whLowStock : 5;
+    const storeLowCount = storeLowStock > 0 ? storeLowStock : 5;
 
     await Notification.create([
       {
-        title: `5 New Online Orders in ${storeName}`,
-        message: 'You have received 5 new online orders in store. Please review order details and dispatch status.',
-        type: 'order',
+        title: `Master Warehouse Inventory Initialized`,
+        message: `System master product catalog and warehouse inventory services are online and active.`,
+        type: 'system',
         recipientType: 'Admin',
-        store: firstStore?._id || null,
         isRead: false,
-        actionUrl: '/online-orders',
-        createdAt: new Date(Date.now() - 2 * 60 * 1000), // 2 min ago
+        actionUrl: '/products',
+        createdAt: new Date(Date.now() - 10 * 60 * 1000),
       },
       {
-        title: `5 New Online Orders in ${storeName}`,
-        message: 'You have received 5 new online orders in store. Review customer details and items.',
-        type: 'order',
-        recipientType: 'Admin',
-        store: firstStore?._id || null,
-        isRead: false,
-        actionUrl: '/online-orders',
-        createdAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min ago
-      },
-      {
-        title: `${whLowCount} Products Stock in Warehouse is Low`,
-        message: `Stock level for ${whLowCount} items in the main warehouse has dropped below the minimum alert threshold.`,
+        title: `${whLowCount} Products Stock in Warehouse Alert`,
+        message: `Stock audit complete: ${whLowCount} items in the main warehouse are flagged for reorder monitoring.`,
         type: 'low_stock',
         recipientType: 'Admin',
         isRead: false,
         actionUrl: '/product-stocks',
-        createdAt: new Date(Date.now() - 30 * 60 * 1000), // 30 min ago
+        createdAt: new Date(Date.now() - 30 * 60 * 1000),
       },
       {
-        title: '15 Product will be Expired in 3 Months from Warehouse',
-        message: '15 warehouse items are nearing their expiry date within the next 90 days. Plan clearance or supplier returns.',
-        type: 'expiry',
+        title: `Store '${storeName}' Connection Established`,
+        message: `Real-time POS and inventory synchronization connected with ${storeName}.`,
+        type: 'system',
         recipientType: 'Admin',
+        store: firstStore?._id || null,
         isRead: false,
-        actionUrl: '/products',
-        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+        actionUrl: '/stores',
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
       },
       {
-        title: `${storeLowCount} Products Stock in ${storeName} is Low`,
-        message: `Stock for ${storeLowCount} products in ${storeName} is running low. Reorder or transfer stock.`,
+        title: `${storeLowCount} Products Stock in ${storeName} Alert`,
+        message: `Stock level monitoring active for ${storeName} (${storeLowCount} low-stock alerts tracked).`,
         type: 'low_stock',
         recipientType: 'Admin',
         store: firstStore?._id || null,
         isRead: false,
         actionUrl: '/store-products',
-        createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
+        createdAt: new Date(Date.now() - 120 * 60 * 1000),
       },
     ]);
   }

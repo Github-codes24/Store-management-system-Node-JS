@@ -10,8 +10,8 @@ const customerSchema = new mongoose.Schema(
     },
     name: {
       type: String,
-      required: [true, 'Customer name is required'],
       trim: true,
+      default: 'Customer',
     },
     email: {
       type: String,
@@ -23,6 +23,16 @@ const customerSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Mobile number is required'],
       trim: true,
+    },
+    otp: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    otpExpires: {
+      type: Date,
+      default: null,
+      select: false,
     },
     dateOfBirth: {
       type: Date,
