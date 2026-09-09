@@ -32,7 +32,7 @@ export const createUnit = async (req, res, next) => {
 
 export const getUnits = async (req, res, next) => {
   try {
-    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
+    const { search, status, onlyActive, includeInactive, page, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -43,14 +43,18 @@ export const getUnits = async (req, res, next) => {
       ];
     }
 
-    if (onlyActive === 'true' || onlyActive === true) {
+    if (status === 'inactive') {
+      filter.status = 'inactive';
+    } else if (status === 'all' || status === 'both' || includeInactive === 'true' || includeInactive === true) {
+      // explicit all
+    } else if ((status === '' || status === undefined) && page) {
+      // Table view with "All Statuses" selected
+    } else {
       filter.status = 'active';
-    } else if (status && ['active', 'inactive'].includes(status)) {
-      filter.status = status;
     }
 
     const total = await Unit.countDocuments(filter);
-    const pagination = getPagination({ page, limit, total });
+    const pagination = getPagination({ page: page || 1, limit, total });
 
     const units = await Unit.find(filter)
       .sort({ createdAt: -1 })

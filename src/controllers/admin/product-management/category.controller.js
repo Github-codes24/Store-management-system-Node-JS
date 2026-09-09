@@ -48,7 +48,7 @@ export const createCategory = async (req, res, next) => {
 
 export const getCategories = async (req, res, next) => {
   try {
-    const { search, productType, status, onlyActive, page = 1, limit = 10 } = req.query;
+    const { search, productType, status, onlyActive, includeInactive, page, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -60,10 +60,14 @@ export const getCategories = async (req, res, next) => {
       filter.productType = productType;
     }
 
-    if (onlyActive === 'true' || onlyActive === true) {
+    if (status === 'inactive') {
+      filter.status = 'inactive';
+    } else if (status === 'all' || status === 'both' || includeInactive === 'true' || includeInactive === true) {
+      // explicit all
+    } else if ((status === '' || status === undefined) && page) {
+      // Table view with "All Statuses" selected
+    } else {
       filter.status = 'active';
-    } else if (status && ['active', 'inactive'].includes(status)) {
-      filter.status = status;
     }
 
     // Filter out categories belonging to inactive product types when querying active categories

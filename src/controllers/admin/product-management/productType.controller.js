@@ -6,6 +6,32 @@ import { badRequest, notFound, conflict } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
 import { processUploadedFile } from '../../../utils/file-upload.js';
 
+export const syncInactiveStatuses = async () => {
+  try {
+    const inactiveProductTypeIds = await ProductType.find({ status: 'inactive' }).distinct('_id');
+    if (inactiveProductTypeIds.length > 0) {
+      await Category.updateMany(
+        { productType: { $in: inactiveProductTypeIds }, status: { $ne: 'inactive' } },
+        { status: 'inactive' }
+      );
+      await Subcategory.updateMany(
+        { productType: { $in: inactiveProductTypeIds }, status: { $ne: 'inactive' } },
+        { status: 'inactive' }
+      );
+    }
+
+    const inactiveCategoryIds = await Category.find({ status: 'inactive' }).distinct('_id');
+    if (inactiveCategoryIds.length > 0) {
+      await Subcategory.updateMany(
+        { category: { $in: inactiveCategoryIds }, status: { $ne: 'inactive' } },
+        { status: 'inactive' }
+      );
+    }
+  } catch (_e) {
+    // silent catch
+  }
+};
+
 export const createProductType = async (req, res, next) => {
   try {
     const { name, description, status } = req.body;
@@ -37,7 +63,8 @@ export const createProductType = async (req, res, next) => {
 
 export const getProductTypes = async (req, res, next) => {
   try {
-    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
+    await syncInactiveStatuses();
+    const { search, status, onlyActive, includeInactive, page, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -45,14 +72,18 @@ export const getProductTypes = async (req, res, next) => {
       filter.name = { $regex: search.trim(), $options: 'i' };
     }
 
-    if (onlyActive === 'true' || onlyActive === true) {
+    if (status === 'inactive') {
+      filter.status = 'inactive';
+    } else if (status === 'all' || status === 'both' || includeInactive === 'true' || includeInactive === true) {
+      // explicit all
+    } else if ((status === '' || status === undefined) && page) {
+      // Table view with "All Statuses" selected
+    } else {
       filter.status = 'active';
-    } else if (status && ['active', 'inactive'].includes(status)) {
-      filter.status = status;
     }
 
     const total = await ProductType.countDocuments(filter);
-    const pagination = getPagination({ page, limit, total });
+    const pagination = getPagination({ page: page || 1, limit, total });
 
     const productTypes = await ProductType.find(filter)
       .sort({ createdAt: -1 })
@@ -124,6 +155,7 @@ export const updateProductType = async (req, res, next) => {
     }
 
     await productType.save();
+    await syncInactiveStatuses();
 
     return res.status(200).json(
       successResponse({
@@ -153,6 +185,7 @@ export const toggleProductTypeStatus = async (req, res, next) => {
       await Category.updateMany({ productType: id }, { status: 'inactive' });
       await Subcategory.updateMany({ productType: id }, { status: 'inactive' });
     }
+    await syncInactiveStatuses();
 
     return res.status(200).json(
       successResponse({
@@ -198,6 +231,7 @@ export const deleteProductType = async (req, res, next) => {
 
 export const getProductTypeDropdown = async (req, res, next) => {
   try {
+    await syncInactiveStatuses();
     const productTypes = await ProductType.find({ status: 'active' })
       .select('name _id status')
       .sort({ name: 1 });

@@ -36,7 +36,7 @@ export const createBrand = async (req, res, next) => {
 
 export const getBrands = async (req, res, next) => {
   try {
-    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
+    const { search, status, onlyActive, includeInactive, page, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -44,14 +44,18 @@ export const getBrands = async (req, res, next) => {
       filter.name = { $regex: search.trim(), $options: 'i' };
     }
 
-    if (onlyActive === 'true' || onlyActive === true) {
+    if (status === 'inactive') {
+      filter.status = 'inactive';
+    } else if (status === 'all' || status === 'both' || includeInactive === 'true' || includeInactive === true) {
+      // explicit all
+    } else if ((status === '' || status === undefined) && page) {
+      // Table view with "All Statuses" selected
+    } else {
       filter.status = 'active';
-    } else if (status && ['active', 'inactive'].includes(status)) {
-      filter.status = status;
     }
 
     const total = await Brand.countDocuments(filter);
-    const pagination = getPagination({ page, limit, total });
+    const pagination = getPagination({ page: page || 1, limit, total });
 
     const brands = await Brand.find(filter)
       .sort({ createdAt: -1 })
