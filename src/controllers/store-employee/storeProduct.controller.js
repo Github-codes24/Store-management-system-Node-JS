@@ -695,32 +695,45 @@ export const getStoreProductDropdownOptions = async (req, res, next) => {
 
     // Active Product Types
     const productTypes = await ProductType.find({ status: 'active' })
-      .select('name _id')
+      .select('name _id status')
       .sort({ name: 1 });
+    const activePtIds = productTypes.map((pt) => pt._id);
 
-    // Active Categories (filtered by productType if given)
-    const catFilter = { status: 'active' };
-    if (productType) catFilter.productType = productType;
+    // Active Categories (filtered by active productType if given)
+    const catFilter = { status: 'active', productType: { $in: activePtIds } };
+    if (productType) {
+      const isPtActive = activePtIds.some((ptId) => ptId.toString() === productType.toString());
+      if (isPtActive) catFilter.productType = productType;
+      else catFilter.productType = null;
+    }
     const categories = await Category.find(catFilter)
-      .select('name _id productType')
+      .select('name _id productType status')
       .sort({ name: 1 });
+    const activeCatIds = categories.map((c) => c._id);
 
-    // Active Subcategories (filtered by category/productType if given)
-    const subcatFilter = { status: 'active' };
-    if (category) subcatFilter.category = category;
-    else if (productType) subcatFilter.productType = productType;
+    // Active Subcategories (filtered by active category/productType if given)
+    const subcatFilter = { status: 'active', category: { $in: activeCatIds }, productType: { $in: activePtIds } };
+    if (category) {
+      const isCatActive = activeCatIds.some((cId) => cId.toString() === category.toString());
+      if (isCatActive) subcatFilter.category = category;
+      else subcatFilter.category = null;
+    } else if (productType) {
+      const isPtActive = activePtIds.some((ptId) => ptId.toString() === productType.toString());
+      if (isPtActive) subcatFilter.productType = productType;
+      else subcatFilter.productType = null;
+    }
     const subcategories = await Subcategory.find(subcatFilter)
-      .select('name _id category productType')
+      .select('name _id category productType status')
       .sort({ name: 1 });
 
     // Active Brands
     const brands = await Brand.find({ status: 'active' })
-      .select('name _id')
+      .select('name _id status')
       .sort({ name: 1 });
 
     // Active Units
     const units = await Unit.find({ status: 'active' })
-      .select('name shortName _id')
+      .select('name shortName _id status')
       .sort({ name: 1 });
 
     // Product-specific batches (loaded only for the specified product)
@@ -761,11 +774,11 @@ export const getStoreProductDropdownOptions = async (req, res, next) => {
       successResponse({
         message: 'Dropdown options fetched successfully',
         data: {
-          productTypes: productTypes.map((pt) => ({ label: pt.name, value: pt._id })),
-          categories: categories.map((c) => ({ label: c.name, value: c._id, productType: c.productType })),
-          subcategories: subcategories.map((s) => ({ label: s.name, value: s._id, category: s.category })),
-          brands: brands.map((b) => ({ label: b.name, value: b._id })),
-          units: units.map((u) => ({ label: `${u.name} (${u.shortName || u.name})`, value: u._id, name: u.name, shortName: u.shortName })),
+          productTypes: productTypes.map((pt) => ({ label: pt.name, value: pt._id, _id: pt._id, id: pt._id, name: pt.name, status: pt.status })),
+          categories: categories.map((c) => ({ label: c.name, value: c._id, _id: c._id, id: c._id, name: c.name, productType: c.productType, status: c.status })),
+          subcategories: subcategories.map((s) => ({ label: s.name, value: s._id, _id: s._id, id: s._id, name: s.name, category: s.category, productType: s.productType, status: s.status })),
+          brands: brands.map((b) => ({ label: b.name, value: b._id, _id: b._id, id: b._id, name: b.name, status: b.status })),
+          units: units.map((u) => ({ label: `${u.name} (${u.shortName || u.name})`, value: u._id, _id: u._id, id: u._id, name: u.name, shortName: u.shortName, status: u.status })),
           batches: productBatches,
         },
       })

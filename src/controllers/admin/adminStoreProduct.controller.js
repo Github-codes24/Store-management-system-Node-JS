@@ -373,23 +373,25 @@ export const deleteAdminStoreProduct = async (req, res, next) => {
  */
 export const getAdminStoreProductFilterOptions = async (req, res, next) => {
   try {
-    const [stores, productTypes, categories, subcategories, brands] = await Promise.all([
-      Store.find({ isDeleted: false }).select('_id name storeCode location').sort({ name: 1 }),
-      ProductType.find({ isDeleted: false }).select('_id name').sort({ name: 1 }),
-      Category.find({ isDeleted: false }).select('_id name categoryName').sort({ name: 1 }),
-      Subcategory.find({ isDeleted: false }).select('_id name subcategoryName category').sort({ name: 1 }),
-      Brand.find({ isDeleted: false }).select('_id name').sort({ name: 1 }),
-    ]);
+    const productTypes = await ProductType.find({ status: 'active' }).select('_id name status').sort({ name: 1 });
+    const activePtIds = productTypes.map((pt) => pt._id);
+
+    const categories = await Category.find({ status: 'active', productType: { $in: activePtIds } }).select('_id name categoryName productType status').sort({ name: 1 });
+    const activeCatIds = categories.map((c) => c._id);
+
+    const subcategories = await Subcategory.find({ status: 'active', category: { $in: activeCatIds }, productType: { $in: activePtIds } }).select('_id name subcategoryName category productType status').sort({ name: 1 });
+    const brands = await Brand.find({ status: 'active' }).select('_id name status').sort({ name: 1 });
+    const stores = await Store.find({ isDeleted: false }).select('_id name storeCode location').sort({ name: 1 });
 
     return res.status(200).json(
       successResponse({
         message: 'Filter options retrieved successfully',
         data: {
-          stores: stores.map((s) => ({ _id: s._id, id: s._id, name: s.name, storeCode: s.storeCode, location: s.location })),
-          productTypes: productTypes.map((pt) => ({ _id: pt._id, id: pt._id, name: pt.name })),
-          categories: categories.map((c) => ({ _id: c._id, id: c._id, name: c.name || c.categoryName })),
-          subcategories: subcategories.map((sc) => ({ _id: sc._id, id: sc._id, name: sc.name || sc.subcategoryName, category: sc.category })),
-          brands: brands.map((b) => ({ _id: b._id, id: b._id, name: b.name })),
+          stores: stores.map((s) => ({ _id: s._id, id: s._id, name: s.name, label: s.name, value: s._id, storeCode: s.storeCode, location: s.location })),
+          productTypes: productTypes.map((pt) => ({ _id: pt._id, id: pt._id, name: pt.name, label: pt.name, value: pt._id, status: pt.status })),
+          categories: categories.map((c) => ({ _id: c._id, id: c._id, name: c.name || c.categoryName, label: c.name || c.categoryName, value: c._id, productType: c.productType, status: c.status })),
+          subcategories: subcategories.map((sc) => ({ _id: sc._id, id: sc._id, name: sc.name || sc.subcategoryName, label: sc.name || sc.subcategoryName, value: sc._id, category: sc.category, status: sc.status })),
+          brands: brands.map((b) => ({ _id: b._id, id: b._id, name: b.name, label: b.name, value: b._id, status: b.status })),
           statuses: ['Active', 'Low Stock', 'Near Expiry', 'Sold', 'Inactive'],
         },
       })
