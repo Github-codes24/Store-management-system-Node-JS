@@ -36,7 +36,7 @@ export const createBrand = async (req, res, next) => {
 
 export const getBrands = async (req, res, next) => {
   try {
-    const { search, status, page = 1, limit = 10 } = req.query;
+    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -44,7 +44,9 @@ export const getBrands = async (req, res, next) => {
       filter.name = { $regex: search.trim(), $options: 'i' };
     }
 
-    if (status && ['active', 'inactive'].includes(status)) {
+    if (onlyActive === 'true' || onlyActive === true) {
+      filter.status = 'active';
+    } else if (status && ['active', 'inactive'].includes(status)) {
       filter.status = status;
     }
 
@@ -176,12 +178,16 @@ export const deleteBrand = async (req, res, next) => {
 export const getBrandDropdown = async (req, res, next) => {
   try {
     const brands = await Brand.find({ status: 'active' })
-      .select('name _id')
+      .select('name _id status')
       .sort({ name: 1 });
 
     const dropdownData = brands.map((b) => ({
       label: b.name,
       value: b._id,
+      _id: b._id,
+      id: b._id,
+      name: b.name,
+      status: b.status,
     }));
 
     return res.status(200).json(

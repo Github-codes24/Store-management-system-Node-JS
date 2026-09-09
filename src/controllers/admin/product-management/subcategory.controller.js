@@ -61,7 +61,7 @@ export const createSubcategory = async (req, res, next) => {
 
 export const getSubcategories = async (req, res, next) => {
   try {
-    const { search, productType, category, status, page = 1, limit = 10 } = req.query;
+    const { search, productType, category, status, onlyActive, page = 1, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -77,8 +77,36 @@ export const getSubcategories = async (req, res, next) => {
       filter.category = category;
     }
 
-    if (status && ['active', 'inactive'].includes(status)) {
+    if (onlyActive === 'true' || onlyActive === true) {
+      filter.status = 'active';
+    } else if (status && ['active', 'inactive'].includes(status)) {
       filter.status = status;
+    }
+
+    if (filter.status === 'active') {
+      const activeProductTypeIds = await ProductType.find({ status: 'active' }).distinct('_id');
+      const activeCategoryIds = await Category.find({
+        status: 'active',
+        productType: { $in: activeProductTypeIds },
+      }).distinct('_id');
+
+      if (filter.productType) {
+        const isPtActive = activeProductTypeIds.some(
+          (apt) => apt.toString() === filter.productType.toString()
+        );
+        if (!isPtActive) filter.productType = null;
+      } else {
+        filter.productType = { $in: activeProductTypeIds };
+      }
+
+      if (filter.category) {
+        const isCatActive = activeCategoryIds.some(
+          (ac) => ac.toString() === filter.category.toString()
+        );
+        if (!isCatActive) filter.category = null;
+      } else {
+        filter.category = { $in: activeCategoryIds };
+      }
     }
 
     const total = await Subcategory.countDocuments(filter);
@@ -248,22 +276,54 @@ export const deleteSubcategory = async (req, res, next) => {
 export const getSubcategoryDropdown = async (req, res, next) => {
   try {
     const { category, productType } = req.query;
-    const filter = { status: 'active' };
+
+    const activeProductTypeIds = await ProductType.find({ status: 'active' }).distinct('_id');
+    const activeCategoryIds = await Category.find({
+      status: 'active',
+      productType: { $in: activeProductTypeIds },
+    }).distinct('_id');
+
+    const filter = {
+      status: 'active',
+      category: { $in: activeCategoryIds },
+      productType: { $in: activeProductTypeIds },
+    };
 
     if (category) {
-      filter.category = category;
+      const isCatActive = activeCategoryIds.some(
+        (ac) => ac.toString() === category.toString()
+      );
+      if (!isCatActive) {
+        filter.category = null;
+      } else {
+        filter.category = category;
+      }
     }
+
     if (productType) {
-      filter.productType = productType;
+      const isPtActive = activeProductTypeIds.some(
+        (apt) => apt.toString() === productType.toString()
+      );
+      if (!isPtActive) {
+        filter.productType = null;
+      } else {
+        filter.productType = productType;
+      }
     }
 
     const subcategories = await Subcategory.find(filter)
-      .select('name _id category productType')
+      .select('name _id category productType status')
       .sort({ name: 1 });
 
     const dropdownData = subcategories.map((sub) => ({
       label: sub.name,
       value: sub._id,
+      _id: sub._id,
+      id: sub._id,
+      name: sub.name,
+      category: sub.category ? sub.category.toString() : null,
+      productType: sub.productType ? sub.productType.toString() : null,
+      status: sub.status,
     }));
 
     return res.status(200).json(
@@ -281,15 +341,39 @@ export const getSubcategoriesByCategory = async (req, res, next) => {
   try {
     const { categoryId } = req.params;
 
-    const subcategories = await Subcategory.find({ category: categoryId, status: 'active' })
-      .select('name _id category productType')
+    const activeProductTypeIds = await ProductType.find({ status: 'active' }).distinct('_id');
+    const activeCategory = await Category.findOne({
+      _id: categoryId,
+      status: 'active',
+      productType: { $in: activeProductTypeIds },
+    });
+
+    if (!activeCategory) {
+      return res.status(200).json(
+        successResponse({
+          message: 'Subcategories fetched by Category successfully',
+          data: [],
+        })
+      );
+    }
+
+    const subcategories = await Subcategory.find({
+      category: categoryId,
+      status: 'active',
+      productType: { $in: activeProductTypeIds },
+    })
+      .select('name _id category productType status')
       .sort({ name: 1 });
 
     const dropdownData = subcategories.map((sub) => ({
       label: sub.name,
       value: sub._id.toString(),
+      _id: sub._id.toString(),
+      id: sub._id.toString(),
+      name: sub.name,
       category: sub.category.toString(),
       productType: sub.productType ? sub.productType.toString() : null,
+      status: sub.status,
     }));
 
     return res.status(200).json(

@@ -221,5 +221,47 @@ describe('Product Management Masters Integration Tests', () => {
       expect(res.body.data.units.length).toBe(1);
       expect(res.body.data.units[0].shortName).toBe('pc');
     });
+
+    it('should filter out inactive Product Types from dropdown and cascade inactive status to child categories and subcategories', async () => {
+      const ptActive = await ProductType.create({ name: 'Active PT', status: 'active' });
+      const ptInactive = await ProductType.create({ name: 'SUNFEAST', status: 'inactive' });
+
+      const cat1 = await Category.create({ name: 'Cat Active PT', productType: ptActive._id, status: 'active' });
+      const cat2 = await Category.create({ name: 'Cat Inactive PT', productType: ptInactive._id, status: 'active' });
+
+      const sub1 = await Subcategory.create({ name: 'Sub Active PT', productType: ptActive._id, category: cat1._id, status: 'active' });
+      const sub2 = await Subcategory.create({ name: 'Sub Inactive PT', productType: ptInactive._id, category: cat2._id, status: 'active' });
+
+      // 1. Verify getProductTypeDropdown returns only active Product Type
+      const dropdownRes = await request(app)
+        .get('/api/admin/product-management/product-types/dropdown')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(dropdownRes.status).toBe(200);
+      const dropdownNames = dropdownRes.body.data.map((item) => item.label || item.name);
+      expect(dropdownNames).toContain('Active PT');
+      expect(dropdownNames).not.toContain('SUNFEAST');
+
+      // 2. Verify getCategoryDropdown excludes categories of inactive product type
+      const catDropdownRes = await request(app)
+        .get('/api/admin/product-management/categories/dropdown')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(catDropdownRes.status).toBe(200);
+      const catDropdownNames = catDropdownRes.body.data.map((item) => item.label || item.name);
+      expect(catDropdownNames).toContain('Cat Active PT');
+      expect(catDropdownNames).not.toContain('Cat Inactive PT');
+
+      // 3. Toggle ptActive to inactive and verify cascading status update
+      await request(app)
+        .patch(`/api/admin/product-management/product-types/${ptActive._id}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'inactive' });
+
+      const updatedCat1 = await Category.findById(cat1._id);
+      const updatedSub1 = await Subcategory.findById(sub1._id);
+      expect(updatedCat1.status).toBe('inactive');
+      expect(updatedSub1.status).toBe('inactive');
+    });
   });
 });

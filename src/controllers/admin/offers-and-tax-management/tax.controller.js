@@ -12,23 +12,36 @@ import { getPagination } from '../../../utils/pagination.js';
 export const getTaxFilterOptions = async (_req, res, next) => {
   try {
     const productTypes = await ProductType.find({ status: 'active' }).select('_id name').sort({ name: 1 });
-    const categories = await Category.find({ status: 'active' }).select('_id name productType').sort({ name: 1 });
-    const subcategories = await Subcategory.find({ status: 'active' }).select('_id name category productType').sort({ name: 1 });
+    const activePtIds = productTypes.map((pt) => pt._id);
+
+    const categories = await Category.find({ status: 'active', productType: { $in: activePtIds } }).select('_id name productType').sort({ name: 1 });
+    const activeCatIds = categories.map((c) => c._id);
+
+    const subcategories = await Subcategory.find({ status: 'active', category: { $in: activeCatIds }, productType: { $in: activePtIds } }).select('_id name category productType').sort({ name: 1 });
 
     const formattedProductTypes = productTypes.map((pt) => ({
       label: pt.name,
       value: pt._id.toString(),
+      _id: pt._id.toString(),
+      id: pt._id.toString(),
+      name: pt.name,
     }));
 
     const formattedCategories = categories.map((c) => ({
       label: c.name,
       value: c._id.toString(),
+      _id: c._id.toString(),
+      id: c._id.toString(),
+      name: c.name,
       productType: c.productType ? c.productType.toString() : null,
     }));
 
     const formattedSubcategories = subcategories.map((sc) => ({
       label: sc.name,
       value: sc._id.toString(),
+      _id: sc._id.toString(),
+      id: sc._id.toString(),
+      name: sc.name,
       category: sc.category ? sc.category.toString() : null,
       productType: sc.productType ? sc.productType.toString() : null,
     }));

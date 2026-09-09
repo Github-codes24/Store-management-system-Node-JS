@@ -48,7 +48,7 @@ export const createCategory = async (req, res, next) => {
 
 export const getCategories = async (req, res, next) => {
   try {
-    const { search, productType, status, page = 1, limit = 10 } = req.query;
+    const { search, productType, status, onlyActive, page = 1, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -60,8 +60,25 @@ export const getCategories = async (req, res, next) => {
       filter.productType = productType;
     }
 
-    if (status && ['active', 'inactive'].includes(status)) {
+    if (onlyActive === 'true' || onlyActive === true) {
+      filter.status = 'active';
+    } else if (status && ['active', 'inactive'].includes(status)) {
       filter.status = status;
+    }
+
+    // Filter out categories belonging to inactive product types when querying active categories
+    if (filter.status === 'active') {
+      const activeProductTypeIds = await ProductType.find({ status: 'active' }).distinct('_id');
+      if (filter.productType) {
+        const isParentActive = activeProductTypeIds.some(
+          (apt) => apt.toString() === filter.productType.toString()
+        );
+        if (!isParentActive) {
+          filter.productType = null; // No matching active product type
+        }
+      } else {
+        filter.productType = { $in: activeProductTypeIds };
+      }
     }
 
     const total = await Category.countDocuments(filter);
@@ -138,7 +155,12 @@ export const updateCategory = async (req, res, next) => {
     }
 
     if (description !== undefined) category.description = description;
-    if (status !== undefined) category.status = status;
+    if (status !== undefined) {
+      category.status = status;
+      if (status === 'inactive') {
+        await Subcategory.updateMany({ category: id }, { status: 'inactive' });
+      }
+    }
 
     if (req.file || req.body.image !== undefined) {
       const newImage = await processUploadedFile(req.file, req.body.image, req);
@@ -171,6 +193,11 @@ export const toggleCategoryStatus = async (req, res, next) => {
 
     category.status = status || (category.status === 'active' ? 'inactive' : 'active');
     await category.save();
+
+    if (category.status === 'inactive') {
+      await Subcategory.updateMany({ category: id }, { status: 'inactive' });
+    }
+
     const updatedCategory = await category.populate('productType', 'name image status');
 
     return res.status(200).json(
@@ -218,19 +245,36 @@ export const deleteCategory = async (req, res, next) => {
 export const getCategoryDropdown = async (req, res, next) => {
   try {
     const { productType } = req.query;
-    const filter = { status: 'active' };
+    const activeProductTypeIds = await ProductType.find({ status: 'active' }).distinct('_id');
+
+    const filter = {
+      status: 'active',
+      productType: { $in: activeProductTypeIds },
+    };
 
     if (productType) {
-      filter.productType = productType;
+      const isParentActive = activeProductTypeIds.some(
+        (apt) => apt.toString() === productType.toString()
+      );
+      if (!isParentActive) {
+        filter.productType = null;
+      } else {
+        filter.productType = productType;
+      }
     }
 
     const categories = await Category.find(filter)
-      .select('name _id productType')
+      .select('name _id productType status')
       .sort({ name: 1 });
 
     const dropdownData = categories.map((cat) => ({
       label: cat.name,
       value: cat._id,
+      _id: cat._id,
+      id: cat._id,
+      name: cat.name,
+      productType: cat.productType ? cat.productType.toString() : null,
+      status: cat.status,
     }));
 
     return res.status(200).json(
@@ -248,14 +292,28 @@ export const getCategoriesByProductType = async (req, res, next) => {
   try {
     const { productTypeId } = req.params;
 
+    const activeProductType = await ProductType.findOne({ _id: productTypeId, status: 'active' });
+    if (!activeProductType) {
+      return res.status(200).json(
+        successResponse({
+          message: 'Categories fetched by Product Type successfully',
+          data: [],
+        })
+      );
+    }
+
     const categories = await Category.find({ productType: productTypeId, status: 'active' })
-      .select('name _id productType')
+      .select('name _id productType status')
       .sort({ name: 1 });
 
     const dropdownData = categories.map((cat) => ({
       label: cat.name,
       value: cat._id.toString(),
+      _id: cat._id.toString(),
+      id: cat._id.toString(),
+      name: cat.name,
       productType: cat.productType.toString(),
+      status: cat.status,
     }));
 
     return res.status(200).json(

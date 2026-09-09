@@ -3,6 +3,7 @@ import Store from '../../../models/store.model.js';
 import Customer from '../../../models/customer.model.js';
 import AdminProduct from '../../../models/adminProduct.model.js';
 import Category from '../../../models/category.model.js';
+import ProductType from '../../../models/productType.model.js';
 import { successResponse } from '../../../utils/api-response.js';
 import { notFound, badRequest } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
@@ -57,12 +58,13 @@ export const getOfferFormOptions = async (req, res, next) => {
     }));
 
     // Fetch live products from AdminProduct collection
-    const liveProducts = await AdminProduct.find({ isDeleted: false })
+    const liveProducts = await AdminProduct.find({ isDeleted: false, status: 'active' })
       .select('_id productName status')
       .sort({ productName: 1 });
 
-    // Fetch live categories from Category collection
-    const liveCategories = await Category.find({ status: 'active' })
+    // Fetch live categories from Category collection belonging to active ProductTypes
+    const activePtIds = await ProductType.find({ status: 'active' }).distinct('_id');
+    const liveCategories = await Category.find({ status: 'active', productType: { $in: activePtIds } })
       .select('_id name')
       .sort({ name: 1 });
 

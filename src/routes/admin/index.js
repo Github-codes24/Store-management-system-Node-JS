@@ -19,6 +19,7 @@ import adminDashboardRoutes from './adminDashboard.routes.js';
 
 import adminReportRoutes from './adminReport.routes.js';
 import adminNotificationRoutes from './adminNotification.routes.js';
+import roleRoutes from './role.routes.js';
 
 const router = Router();
 
@@ -33,6 +34,11 @@ router.use('/reports', adminReportRoutes);
 
 // Admin Notifications Module Routes
 router.use('/notifications', adminNotificationRoutes);
+
+// Roles & Permissions Module Routes
+router.use('/roles-and-permissions', roleRoutes);
+router.use('/roles', roleRoutes);
+
 
 
 

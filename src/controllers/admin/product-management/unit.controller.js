@@ -32,7 +32,7 @@ export const createUnit = async (req, res, next) => {
 
 export const getUnits = async (req, res, next) => {
   try {
-    const { search, status, page = 1, limit = 10 } = req.query;
+    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -43,7 +43,9 @@ export const getUnits = async (req, res, next) => {
       ];
     }
 
-    if (status && ['active', 'inactive'].includes(status)) {
+    if (onlyActive === 'true' || onlyActive === true) {
+      filter.status = 'active';
+    } else if (status && ['active', 'inactive'].includes(status)) {
       filter.status = status;
     }
 
@@ -170,13 +172,17 @@ export const deleteUnit = async (req, res, next) => {
 export const getUnitDropdown = async (req, res, next) => {
   try {
     const units = await Unit.find({ status: 'active' })
-      .select('name shortName _id')
+      .select('name shortName _id status')
       .sort({ name: 1 });
 
     const dropdownData = units.map((u) => ({
       label: u.shortName ? `${u.name} (${u.shortName})` : u.name,
       value: u._id,
+      _id: u._id,
+      id: u._id,
+      name: u.name,
       shortName: u.shortName,
+      status: u.status,
     }));
 
     return res.status(200).json(

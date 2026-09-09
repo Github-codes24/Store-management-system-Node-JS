@@ -1,5 +1,6 @@
 import ProductType from '../../../models/productType.model.js';
 import Category from '../../../models/category.model.js';
+import Subcategory from '../../../models/subcategory.model.js';
 import { successResponse } from '../../../utils/api-response.js';
 import { badRequest, notFound, conflict } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
@@ -36,7 +37,7 @@ export const createProductType = async (req, res, next) => {
 
 export const getProductTypes = async (req, res, next) => {
   try {
-    const { search, status, page = 1, limit = 10 } = req.query;
+    const { search, status, onlyActive, page = 1, limit = 10 } = req.query;
 
     const filter = {};
 
@@ -44,7 +45,9 @@ export const getProductTypes = async (req, res, next) => {
       filter.name = { $regex: search.trim(), $options: 'i' };
     }
 
-    if (status && ['active', 'inactive'].includes(status)) {
+    if (onlyActive === 'true' || onlyActive === true) {
+      filter.status = 'active';
+    } else if (status && ['active', 'inactive'].includes(status)) {
       filter.status = status;
     }
 
@@ -107,7 +110,13 @@ export const updateProductType = async (req, res, next) => {
     }
 
     if (description !== undefined) productType.description = description;
-    if (status !== undefined) productType.status = status;
+    if (status !== undefined) {
+      productType.status = status;
+      if (status === 'inactive') {
+        await Category.updateMany({ productType: id }, { status: 'inactive' });
+        await Subcategory.updateMany({ productType: id }, { status: 'inactive' });
+      }
+    }
 
     if (req.file || req.body.image !== undefined) {
       const newImage = await processUploadedFile(req.file, req.body.image, req);
@@ -139,6 +148,11 @@ export const toggleProductTypeStatus = async (req, res, next) => {
 
     productType.status = status || (productType.status === 'active' ? 'inactive' : 'active');
     await productType.save();
+
+    if (productType.status === 'inactive') {
+      await Category.updateMany({ productType: id }, { status: 'inactive' });
+      await Subcategory.updateMany({ productType: id }, { status: 'inactive' });
+    }
 
     return res.status(200).json(
       successResponse({
@@ -185,12 +199,16 @@ export const deleteProductType = async (req, res, next) => {
 export const getProductTypeDropdown = async (req, res, next) => {
   try {
     const productTypes = await ProductType.find({ status: 'active' })
-      .select('name _id')
+      .select('name _id status')
       .sort({ name: 1 });
 
     const dropdownData = productTypes.map((pt) => ({
       label: pt.name,
       value: pt._id,
+      _id: pt._id,
+      id: pt._id,
+      name: pt.name,
+      status: pt.status,
     }));
 
     return res.status(200).json(
