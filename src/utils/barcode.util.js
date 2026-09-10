@@ -263,6 +263,8 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
 
       const totalRows = Math.ceil(printableCount / 2);
 
+      const brandName = (product.brand?.name || product.brandName || '').toString().trim();
+
       for (let r = 0; r < totalRows; r++) {
         doc.addPage({
           size: [pageW, pageH],
@@ -275,49 +277,107 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
 
           const stickerX = c === 0 ? 0 : labelW + colGap;
 
-          // 1. Product Name (top)
-          doc
-            .font('Helvetica-Bold')
-            .fontSize(7)
-            .fillColor('#000000')
-            .text(prodTitle, stickerX + 3, 2.5, {
-              width: labelW - 6,
-              align: 'center',
-              ellipsis: true,
-              lineBreak: false,
-            });
+          if (brandName) {
+            // Brand Name
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(5.5)
+              .fillColor('#222222')
+              .text(brandName.toUpperCase(), stickerX + 3, 2, {
+                width: labelW - 6,
+                align: 'center',
+                ellipsis: true,
+                lineBreak: false,
+              });
 
-          // 2. Price (MRP / Sale)
-          doc
-            .font('Helvetica-Bold')
-            .fontSize(6.5)
-            .fillColor('#000000')
-            .text(priceText, stickerX + 3, 11, {
-              width: labelW - 6,
-              align: 'center',
-              lineBreak: false,
-            });
+            // Product Name
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(6.5)
+              .fillColor('#000000')
+              .text(prodTitle, stickerX + 3, 8.5, {
+                width: labelW - 6,
+                align: 'center',
+                ellipsis: true,
+                lineBreak: false,
+              });
 
-          // 3. Barcode Bars
-          const availableBarcodeWidth = labelW - 16; // 125.7 pt (~44.3 mm)
-          const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-          const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
-          const barStartY = 20;
-          const barHeight = 35; // 35 pt (~12.3 mm) crisp scan height
+            // Price (MRP / Sale)
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(6)
+              .fillColor('#000000')
+              .text(priceText, stickerX + 3, 16.5, {
+                width: labelW - 6,
+                align: 'center',
+                lineBreak: false,
+              });
 
-          renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+            // Barcode Bars
+            const availableBarcodeWidth = labelW - 16;
+            const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
+            const barStartY = 24.5;
+            const barHeight = 28;
 
-          // 4. Barcode Numeric String
-          doc
-            .font('Helvetica-Bold')
-            .fontSize(7.5)
-            .fillColor('#000000')
-            .text(barcodeStr, stickerX + 3, 58, {
-              width: labelW - 6,
-              align: 'center',
-              characterSpacing: 1.2,
-              lineBreak: false,
-            });
+            renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+
+            // Barcode Numeric String
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(6.8)
+              .fillColor('#000000')
+              .text(barcodeStr, stickerX + 3, 54.5, {
+                width: labelW - 6,
+                align: 'center',
+                characterSpacing: 1.1,
+                lineBreak: false,
+              });
+          } else {
+            // Product Name (top)
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(7)
+              .fillColor('#000000')
+              .text(prodTitle, stickerX + 3, 3.5, {
+                width: labelW - 6,
+                align: 'center',
+                ellipsis: true,
+                lineBreak: false,
+              });
+
+            // Price (MRP / Sale)
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(6.5)
+              .fillColor('#000000')
+              .text(priceText, stickerX + 3, 12, {
+                width: labelW - 6,
+                align: 'center',
+                lineBreak: false,
+              });
+
+            // Barcode Bars
+            const availableBarcodeWidth = labelW - 16;
+            const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
+            const barStartY = 22;
+            const barHeight = 31;
+
+            renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+
+            // Barcode Numeric String
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(7)
+              .fillColor('#000000')
+              .text(barcodeStr, stickerX + 3, 55, {
+                width: labelW - 6,
+                align: 'center',
+                characterSpacing: 1.1,
+                lineBreak: false,
+              });
+          }
         }
       }
 
