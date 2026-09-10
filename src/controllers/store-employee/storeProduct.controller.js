@@ -63,12 +63,14 @@ const buildStoreProductFilter = (queryParams, storeId = null) => {
   if (brand) filter.brand = brand;
 
   if (search && search.trim() !== '') {
-    const searchRegex = new RegExp(search.trim(), 'i');
+    const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = new RegExp(escapedSearch, 'i');
     const searchConditions = [
       { productName: searchRegex },
       { barcode: searchRegex },
       { hsnCode: searchRegex },
       { batch: searchRegex },
+      { 'batches.batchNumber': searchRegex },
     ];
     if (filter.$or) {
       filter.$and = [{ $or: filter.$or }, { $or: searchConditions }];
@@ -202,6 +204,7 @@ export const getStoreProducts = async (req, res, next) => {
       successResponse({
         message: 'Store products retrieved successfully',
         data: stockItems,
+        products: stockItems,
         pagination,
       })
     );

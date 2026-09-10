@@ -323,18 +323,33 @@ export const deleteCustomer = async (req, res, next) => {
 export const exportCustomers = async (req, res, next) => {
   try {
     const storeId = req.storeEmployee?.storeId;
+    if (!storeId) {
+      return next(badRequest('No store associated with logged-in employee'));
+    }
 
-    const customers = await Customer.find({ storeId }).sort({ createdAt: -1 });
+    const { search, status } = req.query;
+    const filter = { storeId };
+
+    if (search && search.trim()) {
+      const regex = new RegExp(search.trim(), 'i');
+      filter.$or = [{ name: regex }, { phone: regex }, { email: regex }];
+    }
+
+    if (status && ['active', 'inactive'].includes(status)) {
+      filter.status = status;
+    }
+
+    const customers = await Customer.find(filter).sort({ createdAt: -1 });
 
     const exportData = customers.map((c, index) => ({
       srNo: index + 1,
-      name: c.name,
-      mobile: c.phone,
-      email: c.email,
-      totalPurchase: c.totalPurchase,
-      amountDue: c.amountDue,
-      address: c.address,
-      status: c.status,
+      name: c.name || '-',
+      mobile: c.phone || c.mobile || '-',
+      email: c.email || '-',
+      totalPurchase: c.totalPurchase || 0,
+      amountDue: c.amountDue || 0,
+      address: c.address || '-',
+      status: c.status || 'active',
       createdAt: c.createdAt,
     }));
 
