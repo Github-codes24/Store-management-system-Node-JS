@@ -593,16 +593,17 @@ export const printBarcode = async (req, res, next) => {
     }
 
     const printableQty = Math.max(1, parseInt(quantity, 10) || 1);
+    const size = req.body?.size || req.query?.size || '50x25';
 
     // If PDF format requested via query or Accept header or GET request
     const isPdfRequest = req.query.format === 'pdf' || req.headers.accept?.includes('application/pdf') || req.method === 'GET';
 
     if (isPdfRequest) {
-      const pdfBuffer = await generateBarcodePdfBuffer(product, printableQty);
+      const pdfBuffer = await generateBarcodePdfBuffer(product, printableQty, { size });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `inline; filename="barcode_${product.barcode}_qty${printableQty}.pdf"`
+        `inline; filename="barcode_${product.barcode}_qty${printableQty}_${size}.pdf"`
       );
       return res.status(200).send(pdfBuffer);
     }

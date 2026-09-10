@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Customer from '../../models/customer.model.js';
 import Store from '../../models/store.model.js';
 import { successResponse } from '../../utils/api-response.js';
@@ -289,10 +290,17 @@ export const payDueAmount = async (req, res, next) => {
  */
 export const deleteCustomer = async (req, res, next) => {
   try {
-    const storeId = req.storeEmployee?.storeId;
+    const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const { id } = req.params;
 
-    const customer = await Customer.findOne({ _id: id, storeId });
+    if (!mongoose.isValidObjectId(id)) {
+      return next(notFound('Customer not found in this store'));
+    }
+
+    const customer = await Customer.findOne({
+      _id: id,
+      ...(storeId ? { $or: [{ storeId }, { storeId: null }] } : {}),
+    });
     if (!customer) {
       return next(notFound('Customer not found in this store'));
     }

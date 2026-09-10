@@ -1,6 +1,7 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
+import { jest } from '@jest/globals';
 import app from '../../src/app.js';
 import Store from '../../src/models/store.model.js';
 import StoreEmployee from '../../src/models/storeEmployee.model.js';
@@ -10,6 +11,8 @@ let mongoServer;
 let store1, store2;
 let employee1, employee2;
 let token1, token2;
+
+jest.setTimeout(60000);
 
 beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();

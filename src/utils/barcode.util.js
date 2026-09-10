@@ -120,114 +120,208 @@ export const generateBarcodeSvg = (barcodeStr) => {
 };
 
 /**
- * Generates a PDF buffer containing printable barcode labels with full-width, scannable bars
- * @param {Object} product - Product details (productName, barcode, mrp, onlineSellingPrice)
+ * Helper to render Code 128 black rectangular bars onto a PDFDocument
+ */
+const renderBarcodeBars = (doc, bitSequence, startX, startY, unitW, height) => {
+  doc.fillColor('#000000');
+  let inBar = false;
+  let startIdx = 0;
+
+  for (let s = 0; s <= bitSequence.length; s++) {
+    if (bitSequence[s] === '1') {
+      if (!inBar) {
+        inBar = true;
+        startIdx = s;
+      }
+    } else {
+      if (inBar) {
+        const barW = (s - startIdx) * unitW;
+        const barX = startX + startIdx * unitW;
+        doc.rect(barX, startY, barW, height).fill('#000000');
+        inBar = false;
+      }
+    }
+  }
+};
+
+/**
+ * Generates a PDF buffer containing printable barcode labels.
+ * Defaults to 50x25 mm 2-up thermal roll format (each row has two 50x25 mm stickers with a 5 mm gap).
+ * Also supports standard A4 3-column sheet when options.size === 'a4'.
+ * 
+ * @param {Object} product - Product details (productName, barcode, mrp, offlineSellingPrice, onlineSellingPrice)
  * @param {number} quantity - Number of barcode labels to generate
+ * @param {Object} [options] - Options ({ size: '50x25' | 'a4' })
  * @returns {Promise<Buffer>} PDF Buffer
  */
-export const generateBarcodePdfBuffer = async (product, quantity = 1) => {
+export const generateBarcodePdfBuffer = async (product, quantity = 1, options = {}) => {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 20, size: 'A4' });
-    const buffers = [];
-
-    doc.on('data', (chunk) => buffers.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(buffers)));
-    doc.on('error', (err) => reject(err));
-
-    const labelWidth = 165;
-    const labelHeight = 90;
-    const cols = 3;
-    const startX = 28;
-    const startY = 28;
-    const gapX = 18;
-    const gapY = 18;
-
+    const isA4 = options.size === 'a4' || options.format === 'a4';
     const printableCount = Math.max(1, parseInt(quantity, 10) || 1);
     const barcodeStr = String(product.barcode || '8900000000000').trim();
     const bitSequence = getCode128BitString(barcodeStr);
 
-    for (let i = 0; i < printableCount; i++) {
-      if (i > 0 && i % 21 === 0) {
-        doc.addPage();
+    const mrpNum = Number(product.mrp || 0);
+    const sellNum = Number(product.offlineSellingPrice || product.onlineSellingPrice || 0);
+    let priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')}`;
+    if (sellNum > 0 && sellNum !== mrpNum) {
+      priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')} | Price: Rs. ${sellNum.toLocaleString('en-IN')}`;
+    }
+    const prodTitle = String(product.productName || 'Product').substring(0, 32);
+
+    if (isA4) {
+      // Standard A4 sheet: 3 columns x 7 rows = 21 labels per page
+      const doc = new PDFDocument({ margin: 20, size: 'A4' });
+      const buffers = [];
+      doc.on('data', (chunk) => buffers.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+      doc.on('error', (err) => reject(err));
+
+      const labelWidth = 165;
+      const labelHeight = 90;
+      const cols = 3;
+      const startX = 28;
+      const startY = 28;
+      const gapX = 18;
+      const gapY = 18;
+
+      for (let i = 0; i < printableCount; i++) {
+        if (i > 0 && i % 21 === 0) {
+          doc.addPage();
+        }
+
+        const pageIndex = i % 21;
+        const row = Math.floor(pageIndex / cols);
+        const col = pageIndex % cols;
+
+        const x = startX + col * (labelWidth + gapX);
+        const y = startY + row * (labelHeight + gapY);
+
+        doc.roundedRect(x, y, labelWidth, labelHeight, 5).lineWidth(1).stroke('#000000');
+
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(9.5)
+          .fillColor('#000000')
+          .text(prodTitle, x + 6, y + 8, {
+            width: labelWidth - 12,
+            align: 'center',
+            ellipsis: true,
+          });
+
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(7.5)
+          .fillColor('#222222')
+          .text(priceText, x + 6, y + 21, {
+            width: labelWidth - 12,
+            align: 'center',
+          });
+
+        const availableBarcodeWidth = labelWidth - 20;
+        const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+        const barStartX = x + 10;
+        const barStartY = y + 33;
+        const barHeight = 32;
+
+        renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(8.5)
+          .fillColor('#000000')
+          .text(barcodeStr, x + 6, y + 70, {
+            width: labelWidth - 12,
+            align: 'center',
+            characterSpacing: 1.5,
+          });
       }
 
-      const pageIndex = i % 21;
-      const row = Math.floor(pageIndex / cols);
-      const col = pageIndex % cols;
+      doc.end();
+    } else {
+      // 50x25 mm (2-Up Thermal Roll with 5 mm space between columns)
+      // 1 mm = 72 / 25.4 = 2.83464567 pt
+      // Sticker 1: 50mm (141.73 pt) x 25mm (70.87 pt)
+      // Gap: 5mm (14.17 pt)
+      // Sticker 2: 50mm (141.73 pt) x 25mm (70.87 pt)
+      // Total Page Width: 105mm (297.64 pt), Page Height: 25mm (70.87 pt)
+      const MM_TO_PT = 72 / 25.4;
+      const labelW = 50 * MM_TO_PT;   // 141.732 pt
+      const labelH = 25 * MM_TO_PT;   // 70.866 pt
+      const colGap = 5 * MM_TO_PT;    // 14.173 pt
+      const pageW = 105 * MM_TO_PT;   // 297.638 pt
+      const pageH = 25 * MM_TO_PT;    // 70.866 pt
 
-      const x = startX + col * (labelWidth + gapX);
-      const y = startY + row * (labelHeight + gapY);
+      const doc = new PDFDocument({
+        autoFirstPage: false,
+        margin: 0,
+      });
+      const buffers = [];
+      doc.on('data', (chunk) => buffers.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+      doc.on('error', (err) => reject(err));
 
-      // Label border
-      doc.roundedRect(x, y, labelWidth, labelHeight, 5).lineWidth(1).stroke('#000000');
+      const totalRows = Math.ceil(printableCount / 2);
 
-      // Product Name (Bold)
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(9.5)
-        .fillColor('#000000')
-        .text((product.productName || 'Product').substring(0, 26), x + 6, y + 8, {
-          width: labelWidth - 12,
-          align: 'center',
-          ellipsis: true,
+      for (let r = 0; r < totalRows; r++) {
+        doc.addPage({
+          size: [pageW, pageH],
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
         });
 
-      // Price display
-      const mrpNum = Number(product.mrp || 0);
-      const sellNum = Number(product.offlineSellingPrice || product.onlineSellingPrice || 0);
-      let priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')}`;
-      if (sellNum > 0 && sellNum !== mrpNum) {
-        priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')} | Price: Rs. ${sellNum.toLocaleString('en-IN')}`;
-      }
+        for (let c = 0; c < 2; c++) {
+          const itemIdx = r * 2 + c;
+          if (itemIdx >= printableCount) break;
 
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(7.5)
-        .fillColor('#222222')
-        .text(priceText, x + 6, y + 21, {
-          width: labelWidth - 12,
-          align: 'center',
-        });
+          const stickerX = c === 0 ? 0 : labelW + colGap;
 
-      // Full-length Barcode bars
-      const availableBarcodeWidth = labelWidth - 20; // 145px width across the label
-      const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-      const barStartX = x + 10;
-      const barStartY = y + 33;
-      const barHeight = 32;
+          // 1. Product Name (top)
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(7)
+            .fillColor('#000000')
+            .text(prodTitle, stickerX + 3, 2.5, {
+              width: labelW - 6,
+              align: 'center',
+              ellipsis: true,
+              lineBreak: false,
+            });
 
-      doc.fillColor('#000000');
-      let inBar = false;
-      let startIdx = 0;
+          // 2. Price (MRP / Sale)
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(6.5)
+            .fillColor('#000000')
+            .text(priceText, stickerX + 3, 11, {
+              width: labelW - 6,
+              align: 'center',
+              lineBreak: false,
+            });
 
-      for (let s = 0; s <= bitSequence.length; s++) {
-        if (bitSequence[s] === '1') {
-          if (!inBar) {
-            inBar = true;
-            startIdx = s;
-          }
-        } else {
-          if (inBar) {
-            const barW = (s - startIdx) * unitBarWidth;
-            const barX = barStartX + startIdx * unitBarWidth;
-            doc.rect(barX, barStartY, barW, barHeight).fill('#000000');
-            inBar = false;
-          }
+          // 3. Barcode Bars
+          const availableBarcodeWidth = labelW - 16; // 125.7 pt (~44.3 mm)
+          const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+          const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
+          const barStartY = 20;
+          const barHeight = 35; // 35 pt (~12.3 mm) crisp scan height
+
+          renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+
+          // 4. Barcode Numeric String
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(7.5)
+            .fillColor('#000000')
+            .text(barcodeStr, stickerX + 3, 58, {
+              width: labelW - 6,
+              align: 'center',
+              characterSpacing: 1.2,
+              lineBreak: false,
+            });
         }
       }
 
-      // Barcode numeric string centered below bars
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(8.5)
-        .fillColor('#000000')
-        .text(barcodeStr, x + 6, y + 70, {
-          width: labelWidth - 12,
-          align: 'center',
-          characterSpacing: 1.5,
-        });
+      doc.end();
     }
-
-    doc.end();
   });
 };
