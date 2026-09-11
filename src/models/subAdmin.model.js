@@ -57,6 +57,11 @@ const subAdminSchema = new mongoose.Schema(
       type: String,
       default: 'subadmin',
     },
+    roleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Role',
+      default: null,
+    },
   },
   {
     timestamps: true,
