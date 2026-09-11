@@ -20,3 +20,7 @@ dist/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Ignore API Documentation from Git commits
+API_DOCUMENTATION.md
+
