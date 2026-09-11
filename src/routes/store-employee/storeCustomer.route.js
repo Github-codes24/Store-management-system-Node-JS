@@ -42,4 +42,7 @@ router
   .put(parseForm, validate(updateStoreCustomerSchema), updateCustomer)
   .delete(deleteCustomer);
 
+// Support POST alias for delete if triggered via form/POST
+router.post('/:id/delete', deleteCustomer);
+
 export default router;

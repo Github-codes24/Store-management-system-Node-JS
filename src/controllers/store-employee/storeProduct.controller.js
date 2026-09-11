@@ -11,6 +11,7 @@ import { successResponse } from '../../utils/api-response.js';
 import { generateBarcode, generateBarcodeSvg, generateBarcodePdfBuffer } from '../../utils/barcode.util.js';
 import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
+import { parseFlexibleDate } from '../../utils/date.util.js';
 import ExcelJS from 'exceljs';
 
 /**
@@ -62,12 +63,14 @@ const buildStoreProductFilter = (queryParams, storeId = null) => {
   if (brand) filter.brand = brand;
 
   if (search && search.trim() !== '') {
-    const searchRegex = new RegExp(search.trim(), 'i');
+    const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = new RegExp(escapedSearch, 'i');
     const searchConditions = [
       { productName: searchRegex },
       { barcode: searchRegex },
       { hsnCode: searchRegex },
       { batch: searchRegex },
+      { 'batches.batchNumber': searchRegex },
     ];
     if (filter.$or) {
       filter.$and = [{ $or: filter.$or }, { $or: searchConditions }];
@@ -201,6 +204,7 @@ export const getStoreProducts = async (req, res, next) => {
       successResponse({
         message: 'Store products retrieved successfully',
         data: stockItems,
+        products: stockItems,
         pagination,
       })
     );
@@ -294,6 +298,8 @@ export const createStoreProduct = async (req, res, next) => {
     const createdBy = req.storeEmployee?._id || null;
     const incomingQty = Number(stockQuantity) || 0;
     const alertQty = Number(alertQuantity !== undefined ? alertQuantity : minStockAlert) || 0;
+    const parsedExpiryDate = parseFlexibleDate(expiryDate);
+    const parsedManufactureDate = parseFlexibleDate(manufactureDate);
 
     // Process image
     const imageUrl = await processUploadedFile(req.file, productImage, req);
@@ -334,12 +340,12 @@ export const createStoreProduct = async (req, res, next) => {
           existingProduct.alertQuantity = alertQty;
           existingProduct.minStockAlert = alertQty;
         }
-        if (mrp !== undefined) existingProduct.mrp = Number(mrp) || existingProduct.mrp;
-        if (offlineSellingPrice !== undefined) existingProduct.offlineSellingPrice = Number(offlineSellingPrice) || existingProduct.offlineSellingPrice;
-        if (onlineSellingPrice !== undefined) existingProduct.onlineSellingPrice = Number(onlineSellingPrice) || existingProduct.onlineSellingPrice;
-        if (purchasePrice !== undefined) existingProduct.purchasePrice = Number(purchasePrice) || existingProduct.purchasePrice;
-        if (manufactureDate) existingProduct.manufactureDate = new Date(manufactureDate);
-        if (expiryDate) existingProduct.expiryDate = new Date(expiryDate);
+        if (mrp !== undefined && !isNaN(Number(mrp))) existingProduct.mrp = Number(mrp);
+        if (offlineSellingPrice !== undefined && !isNaN(Number(offlineSellingPrice))) existingProduct.offlineSellingPrice = Number(offlineSellingPrice);
+        if (onlineSellingPrice !== undefined && !isNaN(Number(onlineSellingPrice))) existingProduct.onlineSellingPrice = Number(onlineSellingPrice);
+        if (purchasePrice !== undefined && !isNaN(Number(purchasePrice))) existingProduct.purchasePrice = Number(purchasePrice);
+        if (manufactureDate !== undefined) existingProduct.manufactureDate = parsedManufactureDate;
+        if (expiryDate !== undefined) existingProduct.expiryDate = parsedExpiryDate;
         if (hsnCode) existingProduct.hsnCode = String(hsnCode).trim();
         if (imageUrl) existingProduct.productImage = imageUrl;
         if (Array.isArray(parsedAttributes) && parsedAttributes.length > 0) {
@@ -360,20 +366,20 @@ export const createStoreProduct = async (req, res, next) => {
           if (batchIndex >= 0) {
             existingProduct.batches[batchIndex].stockQuantity =
               (Number(existingProduct.batches[batchIndex].stockQuantity) || 0) + incomingQty;
-            if (mrp !== undefined) existingProduct.batches[batchIndex].mrp = Number(mrp) || existingProduct.batches[batchIndex].mrp;
-            if (offlineSellingPrice !== undefined) existingProduct.batches[batchIndex].offlineSellingPrice = Number(offlineSellingPrice) || existingProduct.batches[batchIndex].offlineSellingPrice;
-            if (onlineSellingPrice !== undefined) existingProduct.batches[batchIndex].onlineSellingPrice = Number(onlineSellingPrice) || existingProduct.batches[batchIndex].onlineSellingPrice;
-            if (manufactureDate) existingProduct.batches[batchIndex].manufactureDate = new Date(manufactureDate);
-            if (expiryDate) existingProduct.batches[batchIndex].expiryDate = new Date(expiryDate);
+            if (mrp !== undefined && !isNaN(Number(mrp))) existingProduct.batches[batchIndex].mrp = Number(mrp);
+            if (offlineSellingPrice !== undefined && !isNaN(Number(offlineSellingPrice))) existingProduct.batches[batchIndex].offlineSellingPrice = Number(offlineSellingPrice);
+            if (onlineSellingPrice !== undefined && !isNaN(Number(onlineSellingPrice))) existingProduct.batches[batchIndex].onlineSellingPrice = Number(onlineSellingPrice);
+            if (manufactureDate !== undefined) existingProduct.batches[batchIndex].manufactureDate = parsedManufactureDate;
+            if (expiryDate !== undefined) existingProduct.batches[batchIndex].expiryDate = parsedExpiryDate;
           } else {
             existingProduct.batches.push({
               batchNumber: resolvedBatchCode,
               stockQuantity: incomingQty,
-              mrp: Number(mrp) || 0,
-              offlineSellingPrice: Number(offlineSellingPrice) || 0,
-              onlineSellingPrice: Number(onlineSellingPrice) || 0,
-              manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
-              expiryDate: expiryDate ? new Date(expiryDate) : null,
+              mrp: !isNaN(Number(mrp)) ? Number(mrp) : 0,
+              offlineSellingPrice: !isNaN(Number(offlineSellingPrice)) ? Number(offlineSellingPrice) : 0,
+              onlineSellingPrice: !isNaN(Number(onlineSellingPrice)) ? Number(onlineSellingPrice) : 0,
+              manufactureDate: parsedManufactureDate,
+              expiryDate: parsedExpiryDate,
             });
           }
           existingProduct.batch = resolvedBatchCode;
@@ -425,11 +431,11 @@ export const createStoreProduct = async (req, res, next) => {
       {
         batchNumber: defaultInitialBatch,
         stockQuantity: incomingQty,
-        mrp: Number(mrp) || 0,
-        offlineSellingPrice: Number(offlineSellingPrice) || 0,
-        onlineSellingPrice: Number(onlineSellingPrice) || 0,
-        manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        mrp: !isNaN(Number(mrp)) ? Number(mrp) : 0,
+        offlineSellingPrice: !isNaN(Number(offlineSellingPrice)) ? Number(offlineSellingPrice) : 0,
+        onlineSellingPrice: !isNaN(Number(onlineSellingPrice)) ? Number(onlineSellingPrice) : 0,
+        manufactureDate: parsedManufactureDate,
+        expiryDate: parsedExpiryDate,
       },
     ];
 
@@ -449,12 +455,12 @@ export const createStoreProduct = async (req, res, next) => {
       stockQuantity: incomingQty,
       alertQuantity: alertQty,
       minStockAlert: alertQty,
-      mrp: Number(mrp) || 0,
-      offlineSellingPrice: Number(offlineSellingPrice) || 0,
-      onlineSellingPrice: Number(onlineSellingPrice) || 0,
-      purchasePrice: Number(purchasePrice) || 0,
-      manufactureDate: manufactureDate ? new Date(manufactureDate) : null,
-      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      mrp: !isNaN(Number(mrp)) ? Number(mrp) : 0,
+      offlineSellingPrice: !isNaN(Number(offlineSellingPrice)) ? Number(offlineSellingPrice) : 0,
+      onlineSellingPrice: !isNaN(Number(onlineSellingPrice)) ? Number(onlineSellingPrice) : 0,
+      purchasePrice: !isNaN(Number(purchasePrice)) ? Number(purchasePrice) : 0,
+      manufactureDate: parsedManufactureDate,
+      expiryDate: parsedExpiryDate,
       hsnCode: hsnCode !== undefined && hsnCode !== null ? String(hsnCode).trim() : null,
       attributes: Array.isArray(parsedAttributes) ? parsedAttributes : [],
       status: status || 'active',
@@ -542,6 +548,24 @@ export const updateStoreProduct = async (req, res, next) => {
 
     if (updateData.alertQuantity !== undefined) {
       updateData.minStockAlert = updateData.alertQuantity;
+    }
+    if (updateData.mrp !== undefined && !isNaN(Number(updateData.mrp))) {
+      updateData.mrp = Number(updateData.mrp);
+    }
+    if (updateData.offlineSellingPrice !== undefined && !isNaN(Number(updateData.offlineSellingPrice))) {
+      updateData.offlineSellingPrice = Number(updateData.offlineSellingPrice);
+    }
+    if (updateData.onlineSellingPrice !== undefined && !isNaN(Number(updateData.onlineSellingPrice))) {
+      updateData.onlineSellingPrice = Number(updateData.onlineSellingPrice);
+    }
+    if (updateData.purchasePrice !== undefined && !isNaN(Number(updateData.purchasePrice))) {
+      updateData.purchasePrice = Number(updateData.purchasePrice);
+    }
+    if (updateData.expiryDate !== undefined) {
+      updateData.expiryDate = parseFlexibleDate(updateData.expiryDate);
+    }
+    if (updateData.manufactureDate !== undefined) {
+      updateData.manufactureDate = parseFlexibleDate(updateData.manufactureDate);
     }
 
     const updatedProduct = await StoreProduct.findByIdAndUpdate(
@@ -973,15 +997,16 @@ export const printStoreProductBarcode = async (req, res, next) => {
     }
 
     const printableQty = Math.max(1, parseInt(quantity, 10) || 1);
+    const size = req.body?.size || req.query?.size || '50x25';
 
     const isPdfRequest = req.query.format === 'pdf' || req.headers.accept?.includes('application/pdf') || req.method === 'GET';
 
     if (isPdfRequest) {
-      const pdfBuffer = await generateBarcodePdfBuffer(product, printableQty);
+      const pdfBuffer = await generateBarcodePdfBuffer(product, printableQty, { size });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `inline; filename="barcode_${product.barcode}_qty${printableQty}.pdf"`
+        `inline; filename="barcode_${product.barcode}_qty${printableQty}_${size}.pdf"`
       );
       return res.status(200).send(pdfBuffer);
     }
