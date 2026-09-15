@@ -330,6 +330,9 @@ describe('Customer App API Integration Tests', () => {
       const singleProdRes = await request(app).get(`/api/customer/products/products/${product._id}`);
       expect(singleProdRes.status).toBe(200);
       expect(singleProdRes.body.data.product._id).toBe(product._id.toString());
+      expect(singleProdRes.body.data.specifications).toBeDefined();
+      expect(Array.isArray(singleProdRes.body.data.specifications)).toBe(true);
+      expect(singleProdRes.body.data.selectableAttributes).toBeDefined();
     });
 
     it('should retrieve category tree with nested subcategories and home dashboard sections', async () => {

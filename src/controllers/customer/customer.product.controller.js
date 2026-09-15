@@ -785,7 +785,169 @@ export const getCustomerProducts = async (req, res, next) => {
 };
 
 /**
- * Get Product Details by ID for Customer App
+ * Helper to build Specifications table & Dynamic Selectable Attributes for Product Details
+ */
+const buildProductVariantsAndSpecs = (rawProduct, siblingProducts = []) => {
+  const p = rawProduct.toObject ? rawProduct.toObject() : { ...rawProduct };
+  const specifications = [];
+
+  // 1. Core Specs
+  specifications.push({ label: 'Pack Of', value: String(p.piece || 1) });
+
+  if (p.brand && p.brand.name) {
+    specifications.push({ label: 'Brand', value: p.brand.name });
+  }
+
+  const unitName = p.unit?.name || p.unit?.shortName;
+  if (unitName) {
+    specifications.push({ label: 'Quantity', value: unitName });
+  }
+
+  if (p.manufactureDate) {
+    const d = new Date(p.manufactureDate);
+    specifications.push({
+      label: 'Manufacture Date',
+      value: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+    });
+  }
+
+  if (p.expiryDate) {
+    const d = new Date(p.expiryDate);
+    specifications.push({
+      label: 'Expiry Date',
+      value: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+    });
+  }
+
+  // 2. Custom Attributes to Specs
+  const attrList = Array.isArray(p.attributes) ? p.attributes : [];
+  attrList.forEach((attr) => {
+    const label = attr.displayLabel || attr.attributeKey;
+    let valStr = '';
+
+    if (Array.isArray(attr.value)) {
+      const names = attr.value.map((v) => (typeof v === 'object' && v !== null ? v.name || v.label || v.hex : String(v)));
+      valStr = names.join(', ');
+    } else if (typeof attr.value === 'object' && attr.value !== null) {
+      valStr = attr.value.name || attr.value.label || attr.value.hex || JSON.stringify(attr.value);
+    } else if (attr.value !== undefined && attr.value !== null) {
+      valStr = String(attr.value);
+    }
+
+    if (label && valStr) {
+      specifications.push({ label, value: valStr });
+    }
+  });
+
+  // 3. Selectable Attributes (Dynamic Variant Switcher)
+  const selectableAttributes = [];
+  const siblings = Array.isArray(siblingProducts) && siblingProducts.length > 0 ? siblingProducts : [p];
+
+  // A) Colors
+  const colorAttr = attrList.find(
+    (a) => (a.attributeKey && a.attributeKey.toLowerCase() === 'color') || (a.fieldType && a.fieldType === 'Color Picker')
+  );
+
+  if (colorAttr) {
+    const selectedColorName = typeof colorAttr.value === 'string'
+      ? colorAttr.value
+      : Array.isArray(colorAttr.value) && colorAttr.value.length > 0
+        ? colorAttr.value[0]?.name || colorAttr.value[0]?.label || colorAttr.value[0]
+        : '';
+
+    let colorOptions = [];
+    if (Array.isArray(colorAttr.value)) {
+      colorOptions = colorAttr.value.map((cObj) => {
+        const cName = typeof cObj === 'object' ? cObj.name || cObj.label : String(cObj);
+        const cHex = typeof cObj === 'object' ? cObj.hex : null;
+        return {
+          label: cName,
+          value: cHex || cName,
+          productId: p._id,
+          isSelected: String(cName).toLowerCase() === String(selectedColorName).toLowerCase(),
+        };
+      });
+    } else if (typeof colorAttr.value === 'string') {
+      const colorMap = new Map();
+      siblings.forEach((sib) => {
+        const sAttrs = Array.isArray(sib.attributes) ? sib.attributes : [];
+        const sColor = sAttrs.find((a) => a.attributeKey === 'color' || a.fieldType === 'Color Picker');
+        const cVal = sColor ? (typeof sColor.value === 'string' ? sColor.value : sColor.value?.[0]?.name) : null;
+        if (cVal && !colorMap.has(cVal.toLowerCase())) {
+          colorMap.set(cVal.toLowerCase(), {
+            label: cVal,
+            value: cVal,
+            productId: sib._id,
+            isSelected: sib._id.toString() === p._id.toString(),
+          });
+        }
+      });
+
+      colorOptions = Array.from(colorMap.values());
+    }
+
+    if (colorOptions.length > 0) {
+      selectableAttributes.push({
+        attributeKey: 'color',
+        displayLabel: 'Selected Color',
+        selected: selectedColorName || colorOptions[0].label,
+        options: colorOptions,
+      });
+    }
+  }
+
+  // B) Size / Storage / RAM / Variant
+  const variantAttrs = attrList.filter((a) => {
+    const key = (a.attributeKey || '').toLowerCase();
+    return key === 'size' || key === 'variant' || key === 'storage' || key === 'ram' || key === 'packsize';
+  });
+
+  if (variantAttrs.length > 0) {
+    variantAttrs.forEach((vAttr) => {
+      const vKey = vAttr.attributeKey.toLowerCase();
+      const selectedVal = typeof vAttr.value === 'string' ? vAttr.value : String(vAttr.value || '');
+
+      const optMap = new Map();
+      siblings.forEach((sib) => {
+        const sAttrs = Array.isArray(sib.attributes) ? sib.attributes : [];
+        const matchAttr = sAttrs.find((a) => (a.attributeKey || '').toLowerCase() === vKey);
+        if (matchAttr && matchAttr.value) {
+          const optVal = String(matchAttr.value);
+          if (!optMap.has(optVal.toLowerCase())) {
+            optMap.set(optVal.toLowerCase(), {
+              label: optVal,
+              value: optVal,
+              productId: sib._id,
+              isSelected: sib._id.toString() === p._id.toString() || optVal.toLowerCase() === selectedVal.toLowerCase(),
+            });
+          }
+        }
+      });
+
+      if (optMap.size === 0 && selectedVal) {
+        optMap.set(selectedVal.toLowerCase(), {
+          label: selectedVal,
+          value: selectedVal,
+          productId: p._id,
+          isSelected: true,
+        });
+      }
+
+      selectableAttributes.push({
+        attributeKey: vAttr.attributeKey,
+        displayLabel: vAttr.displayLabel || (vKey === 'size' ? 'Selected Size' : 'Variant'),
+        selected: selectedVal,
+        options: Array.from(optMap.values()),
+      });
+    });
+  }
+
+  return { specifications, selectableAttributes };
+};
+
+/**
+ * Get Product Details by ID for Customer App (with Specifications & Dynamic Selectable Variants)
+ * GET /api/customer/products/products/:id
  */
 export const getCustomerProductById = async (req, res, next) => {
   try {
@@ -796,27 +958,54 @@ export const getCustomerProductById = async (req, res, next) => {
       .populate('category', 'name')
       .populate('subcategory', 'name')
       .populate('brand', 'name')
-      .populate('unit', 'name shortName');
+      .populate('unit', 'name shortName')
+      .lean();
 
+    let isStoreProduct = false;
     if (!rawProduct) {
       rawProduct = await StoreProduct.findOne({ _id: id, isDeleted: false, status: 'active' })
         .populate('productType', 'name')
         .populate('category', 'name')
         .populate('subcategory', 'name')
         .populate('brand', 'name')
-        .populate('unit', 'name shortName');
+        .populate('unit', 'name shortName')
+        .lean();
+      isStoreProduct = true;
     }
 
     if (!rawProduct) {
       return next(notFound('Product not found or currently unavailable'));
     }
 
+    const subcatId = rawProduct.subcategory?._id || rawProduct.subcategory;
+    const brandId = rawProduct.brand?._id || rawProduct.brand;
+    const filter = { isDeleted: false, status: 'active' };
+    if (subcatId) filter.subcategory = subcatId;
+    if (brandId) filter.brand = brandId;
+
+    let siblingProducts = [];
+    if (isStoreProduct && rawProduct.storeId) {
+      filter.storeId = rawProduct.storeId;
+      siblingProducts = await StoreProduct.find(filter).lean();
+    } else {
+      siblingProducts = await AdminProduct.find(filter).lean();
+    }
+
     const product = formatCustomerProduct(rawProduct);
+    const { specifications, selectableAttributes } = buildProductVariantsAndSpecs(rawProduct, siblingProducts);
 
     return res.status(200).json(
       successResponse({
         message: 'Product details retrieved successfully',
-        data: { product },
+        data: {
+          product: {
+            ...product,
+            manufactureDate: rawProduct.manufactureDate || null,
+            expiryDate: rawProduct.expiryDate || null,
+          },
+          specifications,
+          selectableAttributes,
+        },
       })
     );
   } catch (error) {
