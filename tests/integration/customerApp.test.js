@@ -160,6 +160,92 @@ describe('Customer App API Integration Tests', () => {
       expect(logoutRes.status).toBe(200);
       expect(logoutRes.body.success).toBe(true);
     });
+
+    it('should save, retrieve, select, and delete customer location with coordinates', async () => {
+      // 1. Send & verify OTP to authenticate
+      const sendRes = await request(app)
+        .post('/api/customer/auth/send-otp')
+        .send({ phone: testMobile });
+      const verifyRes = await request(app)
+        .post('/api/customer/auth/verify-otp')
+        .send({ phone: testMobile, otp: sendRes.body.data.otp });
+
+      const token = verifyRes.body.data.token;
+
+      // 2. Save Home Location with coordinates
+      const saveHomeRes = await request(app)
+        .post('/api/customer/auth/location')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          flatNoStreetArea: 'Flat 101, Sunshine Heights',
+          city: 'New Delhi',
+          state: 'Delhi',
+          country: 'India',
+          pinCode: '110001',
+          landmark: 'Near Metro Station',
+          latitude: 28.6139,
+          longitude: 77.2090,
+          addressType: 'Home',
+          isDefault: true,
+        });
+
+      expect(saveHomeRes.status).toBe(200);
+      expect(saveHomeRes.body.success).toBe(true);
+      expect(saveHomeRes.body.data.currentLocation).toBeDefined();
+      expect(saveHomeRes.body.data.currentLocation.latitude).toBe(28.6139);
+      expect(saveHomeRes.body.data.currentLocation.longitude).toBe(77.2090);
+      expect(saveHomeRes.body.data.currentLocation.addressType).toBe('Home');
+      expect(saveHomeRes.body.data.addresses).toHaveLength(1);
+
+      const homeAddressId = saveHomeRes.body.data.addresses[0]._id;
+
+      // 3. Save Work Location
+      const saveWorkRes = await request(app)
+        .post('/api/customer/auth/location')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          flatNoStreetArea: 'Floor 4, Tech Park',
+          city: 'Gurugram',
+          state: 'Haryana',
+          country: 'India',
+          pinCode: '122002',
+          latitude: 28.4595,
+          longitude: 77.0266,
+          addressType: 'Work',
+          isDefault: false,
+        });
+
+      expect(saveWorkRes.status).toBe(200);
+      expect(saveWorkRes.body.data.addresses).toHaveLength(2);
+      const workAddressId = saveWorkRes.body.data.addresses[1]._id;
+
+      // 4. GET Customer Locations
+      const getLocationsRes = await request(app)
+        .get('/api/customer/auth/location')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(getLocationsRes.status).toBe(200);
+      expect(getLocationsRes.body.data.addresses).toHaveLength(2);
+      expect(getLocationsRes.body.data.currentLocation.addressType).toBe('Home');
+
+      // 5. Select Work Location as active delivery address
+      const selectRes = await request(app)
+        .patch(`/api/customer/auth/location/${workAddressId}/select`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(selectRes.status).toBe(200);
+      expect(selectRes.body.data.currentLocation._id).toBe(workAddressId);
+      expect(selectRes.body.data.currentLocation.addressType).toBe('Work');
+
+      // 6. Delete Home Location
+      const deleteRes = await request(app)
+        .delete(`/api/customer/auth/location/${homeAddressId}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(deleteRes.status).toBe(200);
+      expect(deleteRes.body.data.addresses).toHaveLength(1);
+      expect(deleteRes.body.data.addresses[0]._id).toBe(workAddressId);
+    });
   });
 
   describe('Customer Products & Browsing Endpoints (/api/customer/products)', () => {
@@ -244,6 +330,69 @@ describe('Customer App API Integration Tests', () => {
       const singleProdRes = await request(app).get(`/api/customer/products/products/${product._id}`);
       expect(singleProdRes.status).toBe(200);
       expect(singleProdRes.body.data.product._id).toBe(product._id.toString());
+    });
+
+    it('should retrieve category tree with nested subcategories and home dashboard sections', async () => {
+      // 1. Setup ProductType, Category, Subcategory
+      const groceryType = await ProductType.create({ name: 'Grocery', status: 'active' });
+      const staplesCat = await Category.create({
+        name: 'Staples',
+        productType: groceryType._id,
+        status: 'active',
+      });
+      const subcat = await Subcategory.create({
+        name: 'Masalas & Spices',
+        category: staplesCat._id,
+        productType: groceryType._id,
+        status: 'active',
+      });
+
+      // 2. Setup Brand, Unit, Product with discount
+      const brand = await Brand.create({ name: 'Aashirvaad', status: 'active' });
+      const unit = await Unit.create({ name: 'Kg', shortName: 'kg', status: 'active' });
+
+      await AdminProduct.create({
+        barcode: '89010001',
+        productName: 'Aashirvaad Iodized Salt 1kg',
+        productType: groceryType._id,
+        category: staplesCat._id,
+        subcategory: subcat._id,
+        brand: brand._id,
+        unit: unit._id,
+        purchasePrice: 15,
+        offlineSellingPrice: 20,
+        onlineSellingPrice: 18,
+        mrp: 25, // 28% OFF
+        status: 'active',
+      });
+
+      // Test Category Tree API
+      const treeRes = await request(app).get('/api/customer/products/category-tree');
+      expect(treeRes.status).toBe(200);
+      expect(treeRes.body.success).toBe(true);
+      expect(treeRes.body.data.productTypes).toHaveLength(1);
+      expect(treeRes.body.data.categories).toHaveLength(1);
+      expect(treeRes.body.data.categories[0].subcategories).toHaveLength(1);
+      expect(treeRes.body.data.categories[0].subcategories[0].name).toBe('Masalas & Spices');
+
+      // Test Home Dashboard API
+      const homeRes = await request(app).get('/api/customer/products/home-dashboard');
+      expect(homeRes.status).toBe(200);
+      expect(homeRes.body.success).toBe(true);
+      expect(homeRes.body.data.topCategories).toBeDefined();
+      expect(homeRes.body.data.bestDiscountOffers).toHaveLength(1);
+      expect(homeRes.body.data.bestDiscountOffers[0].discountPercentage).toBe(28);
+      expect(homeRes.body.data.bestDiscountOffers[0].discountTag).toBe('28% OFF');
+
+      // Test Best Discounts Endpoint
+      const discountRes = await request(app).get('/api/customer/products/best-discounts');
+      expect(discountRes.status).toBe(200);
+      expect(discountRes.body.data.products[0].discountTag).toBe('28% OFF');
+
+      // Test Recommended Endpoint
+      const recRes = await request(app).get('/api/customer/products/recommended');
+      expect(recRes.status).toBe(200);
+      expect(recRes.body.data.products).toHaveLength(1);
     });
   });
 });

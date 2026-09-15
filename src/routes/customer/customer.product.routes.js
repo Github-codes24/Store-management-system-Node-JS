@@ -6,11 +6,23 @@ import {
   getCustomerProducts,
   getCustomerProductById,
   getCustomerOffers,
+  getCategoryTree,
+  getHomeDashboard,
+  getBestDiscounts,
+  getRecommendedProducts,
+  getPreviouslyBought,
 } from '../../controllers/customer/customer.product.controller.js';
+import customerAuthMiddleware, { optionalCustomerAuth } from '../../middlewares/customer.auth.middleware.js';
 
 const router = Router();
 
 // Public / Customer Product & Catalog Endpoints
+router.get('/category-tree', getCategoryTree);
+router.get('/home-dashboard', optionalCustomerAuth, getHomeDashboard);
+router.get('/best-discounts', getBestDiscounts);
+router.get('/recommended', getRecommendedProducts);
+router.get('/previously-bought', customerAuthMiddleware, getPreviouslyBought);
+
 router.get('/product-types', getCustomerProductTypes);
 router.get('/categories', getCustomerCategories);
 router.get('/subcategories', getCustomerSubcategories);

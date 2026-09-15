@@ -1,5 +1,63 @@
 import mongoose from 'mongoose';
 
+const addressItemSchema = new mongoose.Schema(
+  {
+    addressType: {
+      type: String,
+      enum: ['Home', 'Work', 'Other'],
+      default: 'Home',
+    },
+    flatNoStreetArea: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    city: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    state: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    country: {
+      type: String,
+      trim: true,
+      default: 'India',
+    },
+    pinCode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    landmark: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    latitude: {
+      type: Number,
+      default: null,
+    },
+    longitude: {
+      type: Number,
+      default: null,
+    },
+    formattedAddress: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: true, timestamps: true }
+);
+
 const customerSchema = new mongoose.Schema(
   {
     storeId: {
@@ -38,10 +96,24 @@ const customerSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other', ''],
+      default: '',
+    },
+    profileImage: {
+      type: String,
+      default: null,
+    },
     address: {
       type: String,
       trim: true,
       default: '',
+    },
+    addresses: [addressItemSchema],
+    currentLocation: {
+      type: addressItemSchema,
+      default: null,
     },
     totalPurchase: {
       type: Number,
