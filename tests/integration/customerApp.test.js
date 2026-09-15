@@ -393,6 +393,23 @@ describe('Customer App API Integration Tests', () => {
       const recRes = await request(app).get('/api/customer/products/recommended');
       expect(recRes.status).toBe(200);
       expect(recRes.body.data.products).toHaveLength(1);
+
+      // Test Subcategory Page API
+      const subcatPageRes = await request(app).get(`/api/customer/products/subcategory-page?subcategory=${subcat._id}&sortBy=discount&minDiscount=20`);
+      expect(subcatPageRes.status).toBe(200);
+      expect(subcatPageRes.body.success).toBe(true);
+      expect(subcatPageRes.body.data.siblingSubcategories).toHaveLength(1);
+      expect(subcatPageRes.body.data.products).toHaveLength(1);
+      expect(subcatPageRes.body.data.products[0].productName).toBe('Aashirvaad Iodized Salt 1kg');
+
+      // Test Filter Options API
+      const filterOptsRes = await request(app).get(`/api/customer/products/filter-options?subcategory=${subcat._id}`);
+      expect(filterOptsRes.status).toBe(200);
+      expect(filterOptsRes.body.success).toBe(true);
+      expect(filterOptsRes.body.data.brands).toHaveLength(1);
+      expect(filterOptsRes.body.data.brands[0].name).toBe('Aashirvaad');
+      expect(filterOptsRes.body.data.quantities).toBeDefined();
+      expect(filterOptsRes.body.data.totalMatchingProducts).toBe(1);
     });
   });
 });

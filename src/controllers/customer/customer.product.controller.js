@@ -5,6 +5,7 @@ import ProductType from '../../models/productType.model.js';
 import Subcategory from '../../models/subcategory.model.js';
 import Offer from '../../models/offer.model.js';
 import StoreOrder from '../../models/storeOrder.model.js';
+import Brand from '../../models/brand.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
@@ -23,10 +24,289 @@ export const formatCustomerProduct = (prod) => {
   }
 
   return {
-    ...p,
+    _id: p._id,
+    productName: p.productName,
+    productImage: p.productImage || null,
+    barcode: p.barcode || null,
+    productType: p.productType || null,
+    category: p.category || null,
+    subcategory: p.subcategory || null,
+    brand: p.brand || null,
+    unit: p.unit || null,
+    mrp,
+    onlineSellingPrice: onlinePrice,
+    stockQuantity: p.stockQuantity ?? p.piece ?? 0,
+    status: p.status || 'active',
+    attributes: Array.isArray(p.attributes) ? p.attributes : [],
     discountPercentage,
     discountTag: discountPercentage > 0 ? `${discountPercentage}% OFF` : null,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
   };
+};
+
+/**
+ * Helper to filter and sort formatted customer products in memory
+ */
+export const applyCustomerFiltersAndSort = (formattedProducts, query) => {
+  let result = [...formattedProducts];
+  const { brands, minDiscount, offers, units, sortBy, search } = query;
+
+  // 1. Search text filter
+  if (search && search.trim() !== '') {
+    const regex = new RegExp(search.trim(), 'i');
+    result = result.filter(
+      (p) =>
+        regex.test(p.productName || '') ||
+        regex.test(p.barcode || '') ||
+        regex.test(p.brand?.name || '')
+    );
+  }
+
+  // 2. Multi-brand filter
+  if (brands) {
+    const brandIds = Array.isArray(brands)
+      ? brands
+      : String(brands)
+          .split(',')
+          .map((b) => b.trim())
+          .filter(Boolean);
+
+    if (brandIds.length > 0) {
+      result = result.filter((p) => {
+        const bId = p.brand?._id ? p.brand._id.toString() : p.brand?.toString() || '';
+        return brandIds.includes(bId);
+      });
+    }
+  }
+
+  // 3. Min Discount filter (10%, 20%, 30%, 40%, 50%)
+  if (minDiscount !== undefined && minDiscount !== null && minDiscount !== '') {
+    const minDiscNum = Number(minDiscount);
+    if (!isNaN(minDiscNum)) {
+      result = result.filter((p) => (p.discountPercentage || 0) >= minDiscNum);
+    }
+  }
+
+  // 4. Offers filter
+  if (offers) {
+    result = result.filter((p) => p.discountPercentage > 0 || (p.offers && p.offers.length > 0));
+  }
+
+  // 5. Quantity / Unit filter
+  if (units) {
+    const unitList = Array.isArray(units)
+      ? units
+      : String(units)
+          .split(',')
+          .map((u) => u.trim().toLowerCase())
+          .filter(Boolean);
+
+    if (unitList.length > 0) {
+      result = result.filter((p) => {
+        const uName = (p.unit?.name || p.unit?.shortName || p.unit || '').toString().toLowerCase();
+        return unitList.some((u) => uName.includes(u));
+      });
+    }
+  }
+
+  // 6. Sorting
+  if (sortBy) {
+    switch (sortBy) {
+      case 'price_low_high':
+        result.sort((a, b) => Number(a.onlineSellingPrice || 0) - Number(b.onlineSellingPrice || 0));
+        break;
+      case 'price_high_low':
+        result.sort((a, b) => Number(b.onlineSellingPrice || 0) - Number(a.onlineSellingPrice || 0));
+        break;
+      case 'discount':
+        result.sort((a, b) => Number(b.discountPercentage || 0) - Number(a.discountPercentage || 0));
+        break;
+      case 'popularity':
+      default:
+        result.sort((a, b) => Number(b.totalSalesCount || 0) - Number(a.totalSalesCount || 0));
+        break;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Get Subcategory Page Products and Left Navigation Strip Sibling Subcategories
+ * GET /api/customer/products/subcategory-page
+ */
+export const getSubcategoryPage = async (req, res, next) => {
+  try {
+    const { subcategory, category, productType, storeId, page = 1, limit = 20 } = req.query;
+
+    let currentSubcategory = null;
+    let targetCatId = category;
+
+    if (subcategory) {
+      currentSubcategory = await Subcategory.findOne({ _id: subcategory, status: 'active' })
+        .populate('category', 'name')
+        .populate('productType', 'name')
+        .lean();
+
+      if (currentSubcategory && currentSubcategory.category) {
+        targetCatId = currentSubcategory.category._id || currentSubcategory.category;
+      }
+    }
+
+    // Fetch sibling subcategories under the same parent category for the left vertical strip
+    let siblingSubcategories = [];
+    if (targetCatId) {
+      siblingSubcategories = await Subcategory.find({
+        category: targetCatId,
+        status: 'active',
+      })
+        .select('name image description category productType _id')
+        .sort({ name: 1 })
+        .lean();
+    }
+
+    // Build Mongoose base filter
+    const filter = { isDeleted: false, status: 'active' };
+    if (subcategory) filter.subcategory = subcategory;
+    else if (targetCatId) filter.category = targetCatId;
+    if (productType) filter.productType = productType;
+
+    let rawProducts = [];
+    if (storeId) {
+      rawProducts = await StoreProduct.find({ ...filter, storeId })
+        .populate('productType', 'name')
+        .populate('category', 'name')
+        .populate('subcategory', 'name')
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .lean();
+    } else {
+      rawProducts = await AdminProduct.find(filter)
+        .populate('productType', 'name')
+        .populate('category', 'name')
+        .populate('subcategory', 'name')
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .lean();
+    }
+
+    const formattedProducts = rawProducts.map(formatCustomerProduct);
+    const filteredSortedProducts = applyCustomerFiltersAndSort(formattedProducts, req.query);
+
+    const total = filteredSortedProducts.length;
+    const pagination = getPagination({ page, limit, total });
+    const products = filteredSortedProducts.slice(pagination.skip, pagination.skip + pagination.limit);
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Subcategory page products and navigation retrieved successfully',
+        data: {
+          subcategory: currentSubcategory,
+          siblingSubcategories,
+          products,
+        },
+        pagination,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get Filter Options for Drawer (Brands, Offers, Discount Tiers, Pack Sizes, Dynamic Count)
+ * GET /api/customer/products/filter-options
+ */
+export const getFilterOptions = async (req, res, next) => {
+  try {
+    const { subcategory, category, productType, storeId, searchBrand } = req.query;
+
+    const filter = { isDeleted: false, status: 'active' };
+    if (subcategory) filter.subcategory = subcategory;
+    if (category) filter.category = category;
+    if (productType) filter.productType = productType;
+
+    let rawProducts = [];
+    if (storeId) {
+      rawProducts = await StoreProduct.find({ ...filter, storeId })
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .lean();
+    } else {
+      rawProducts = await AdminProduct.find(filter)
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .lean();
+    }
+
+    const formattedProducts = rawProducts.map(formatCustomerProduct);
+    const filteredProducts = applyCustomerFiltersAndSort(formattedProducts, req.query);
+
+    // 1. Unique Brands aggregation with product counts
+    const brandMap = new Map();
+    rawProducts.forEach((p) => {
+      if (p.brand && p.brand._id) {
+        const bId = p.brand._id.toString();
+        if (!brandMap.has(bId)) {
+          brandMap.set(bId, {
+            _id: p.brand._id,
+            name: p.brand.name,
+            logo: p.brand.logo || null,
+            count: 0,
+          });
+        }
+        brandMap.get(bId).count += 1;
+      }
+    });
+
+    let brandsList = Array.from(brandMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+    if (searchBrand && searchBrand.trim() !== '') {
+      const regex = new RegExp(searchBrand.trim(), 'i');
+      brandsList = brandsList.filter((b) => regex.test(b.name));
+    }
+
+    // 2. Offer Categories
+    const offersList = [
+      { id: 'store_wide', label: 'Store Wide Offer' },
+      { id: 'special_offer', label: 'Special Offer' },
+    ];
+
+    // 3. Discount Tiers
+    const discountRanges = [
+      { value: 50, label: '50% or more' },
+      { value: 40, label: '40% or more' },
+      { value: 30, label: '30% or more' },
+      { value: 20, label: '20% or more' },
+      { value: 10, label: '10% or more' },
+    ];
+
+    // 4. Quantities / Pack Sizes
+    const quantitySet = new Set();
+    rawProducts.forEach((p) => {
+      const uName = p.unit?.name || p.unit?.shortName || p.unit;
+      if (uName) quantitySet.add(String(uName).trim());
+    });
+    const quantitiesList = Array.from(quantitySet)
+      .sort()
+      .map((q) => ({ id: q.toLowerCase(), label: q }));
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Filter options retrieved successfully',
+        data: {
+          brands: brandsList,
+          offers: offersList,
+          discountRanges,
+          quantities: quantitiesList,
+          totalMatchingProducts: filteredProducts.length,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**
@@ -211,10 +491,6 @@ export const getHomeDashboard = async (req, res, next) => {
       }
     }
 
-    if (previouslyBoughtItems.length === 0) {
-      previouslyBoughtItems = formattedProducts.slice(0, 10);
-    }
-
     return res.status(200).json(
       successResponse({
         message: 'Home dashboard content retrieved successfully',
@@ -255,6 +531,7 @@ export const getBestDiscounts = async (req, res, next) => {
 
     const formattedProducts = rawProducts
       .map(formatCustomerProduct)
+      .filter((p) => p.discountPercentage > 0)
       .sort((a, b) => b.discountPercentage - a.discountPercentage);
 
     const total = formattedProducts.length;
@@ -360,12 +637,11 @@ export const getPreviouslyBought = async (req, res, next) => {
         .lean();
     }
 
-    let formattedProducts = rawProducts
-      .map(formatCustomerProduct)
-      .filter((p) => boughtProdIds.has(p._id.toString()));
-
-    if (formattedProducts.length === 0) {
-      formattedProducts = rawProducts.map(formatCustomerProduct);
+    let formattedProducts = [];
+    if (boughtProdIds.size > 0) {
+      formattedProducts = rawProducts
+        .map(formatCustomerProduct)
+        .filter((p) => boughtProdIds.has(p._id.toString()));
     }
 
     const total = formattedProducts.length;
@@ -455,7 +731,7 @@ export const getCustomerSubcategories = async (req, res, next) => {
 };
 
 /**
- * Get Products List for Customer App (with search, category/type filter & pagination)
+ * Get Products List for Customer App (with search, category/type filter, multi-brand/discount/unit filters & sorting)
  */
 export const getCustomerProducts = async (req, res, next) => {
   try {
@@ -470,56 +746,31 @@ export const getCustomerProducts = async (req, res, next) => {
     filter.category = category ? category : { $in: activeCatIds };
     if (subcategory) filter.subcategory = subcategory;
 
-    if (search && search.trim() !== '') {
-      const regex = new RegExp(search.trim(), 'i');
-      filter.$or = [{ productName: regex }, { barcode: regex }, { hsnCode: regex }];
-    }
-
-    let products = [];
-    let total = 0;
-
+    let rawProducts = [];
     if (storeId) {
-      // Store-specific products
-      const storeFilter = { ...filter, storeId };
-      total = await StoreProduct.countDocuments(storeFilter);
-      const pagination = getPagination({ page, limit, total });
-
-      const rawProds = await StoreProduct.find(storeFilter)
+      rawProducts = await StoreProduct.find({ ...filter, storeId })
         .populate('productType', 'name')
         .populate('category', 'name')
         .populate('subcategory', 'name')
-        .populate('brand', 'name')
+        .populate('brand', 'name logo')
         .populate('unit', 'name shortName')
-        .sort({ createdAt: -1 })
-        .skip(pagination.skip)
-        .limit(pagination.limit);
-
-      products = rawProds.map(formatCustomerProduct);
-
-      return res.status(200).json(
-        successResponse({
-          message: 'Customer products retrieved successfully',
-          data: { products },
-          pagination,
-        })
-      );
+        .lean();
+    } else {
+      rawProducts = await AdminProduct.find(filter)
+        .populate('productType', 'name')
+        .populate('category', 'name')
+        .populate('subcategory', 'name')
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .lean();
     }
 
-    // Default Admin catalog products
-    total = await AdminProduct.countDocuments(filter);
+    const formattedProducts = rawProducts.map(formatCustomerProduct);
+    const filteredSortedProducts = applyCustomerFiltersAndSort(formattedProducts, req.query);
+
+    const total = filteredSortedProducts.length;
     const pagination = getPagination({ page, limit, total });
-
-    const rawProds = await AdminProduct.find(filter)
-      .populate('productType', 'name')
-      .populate('category', 'name')
-      .populate('subcategory', 'name')
-      .populate('brand', 'name')
-      .populate('unit', 'name shortName')
-      .sort({ createdAt: -1 })
-      .skip(pagination.skip)
-      .limit(pagination.limit);
-
-    products = rawProds.map(formatCustomerProduct);
+    const products = filteredSortedProducts.slice(pagination.skip, pagination.skip + pagination.limit);
 
     return res.status(200).json(
       successResponse({
@@ -598,3 +849,4 @@ export const getCustomerOffers = async (_req, res, next) => {
     next(error);
   }
 };
+
