@@ -8,6 +8,7 @@ import {
   logout,
   saveCustomerLocation,
   getCustomerLocations,
+  updateCustomerAddress,
   selectCustomerLocation,
   deleteCustomerAddress,
 } from '../../controllers/customer/customer.auth.controller.js';
@@ -39,6 +40,7 @@ router.post('/logout', customerAuthMiddleware, logout);
 // Customer Location & Address Management Endpoints
 router.post('/location', customerAuthMiddleware, validate(saveLocationSchema), saveCustomerLocation);
 router.get('/location', customerAuthMiddleware, getCustomerLocations);
+router.put('/location/:addressId', customerAuthMiddleware, updateCustomerAddress);
 router.patch('/location/:addressId/select', customerAuthMiddleware, validate(selectLocationSchema), selectCustomerLocation);
 router.delete('/location/:addressId', customerAuthMiddleware, validate(deleteLocationSchema), deleteCustomerAddress);
 

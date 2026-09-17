@@ -412,7 +412,7 @@ export const getCategoryTree = async (req, res, next) => {
  */
 export const getHomeDashboard = async (req, res, next) => {
   try {
-    const { storeId } = req.query;
+    let targetStoreId = req.query.storeId || req.customer?.storeId || null;
 
     // 1. Top Categories (Product Types / Main Categories for top horizontal bar)
     const topCategories = await ProductType.find({ status: 'active' })
@@ -424,12 +424,14 @@ export const getHomeDashboard = async (req, res, next) => {
     const baseFilter = { isDeleted: false, status: 'active' };
 
     let rawProducts = [];
-    if (storeId) {
-      rawProducts = await StoreProduct.find({ ...baseFilter, storeId })
+    if (targetStoreId) {
+      rawProducts = await StoreProduct.find({ ...baseFilter, storeId: targetStoreId })
         .populate('unit', 'name shortName')
         .populate('brand', 'name')
         .lean();
-    } else {
+    }
+
+    if (rawProducts.length === 0) {
       rawProducts = await AdminProduct.find(baseFilter)
         .populate('unit', 'name shortName')
         .populate('brand', 'name')

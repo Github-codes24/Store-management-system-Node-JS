@@ -1,0 +1,20 @@
+import { Router } from 'express';
+import {
+  placeOrder,
+  getMyOrders,
+  getOrderById,
+} from '../../controllers/customer/customer.order.controller.js';
+import customerAuthMiddleware from '../../middlewares/customer.auth.middleware.js';
+import validate from '../../middlewares/validate.middleware.js';
+import { placeOrderSchema } from '../../validations/customer/customer.order.validation.js';
+
+const router = Router();
+
+// All Order routes require Customer Authentication
+router.use(customerAuthMiddleware);
+
+router.post('/place-order', validate(placeOrderSchema), placeOrder);
+router.get('/my-orders', getMyOrders);
+router.get('/:orderId', getOrderById);
+
+export default router;

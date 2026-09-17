@@ -1,4 +1,5 @@
 import Customer from '../../models/customer.model.js';
+import Store from '../../models/store.model.js';
 import env from '../../config/env.js';
 import jwt from 'jsonwebtoken';
 import { customerCookieOptions } from '../../constants/cookieOptions.constants.js';
@@ -11,6 +12,45 @@ import { processUploadedFile } from '../../utils/file-upload.js';
  */
 const generateFourDigitOtp = () => {
   return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+/**
+ * Helper to ensure Customer always has a valid storeId attached (auto-assign first active Store if null)
+ */
+const ensureCustomerStoreId = async (customer, requestedStoreId = null) => {
+  if (requestedStoreId) {
+    customer.storeId = requestedStoreId;
+  } else if (!customer.storeId) {
+    const defaultStore = await Store.findOne({ isDeleted: false }).select('_id');
+    if (defaultStore) {
+      customer.storeId = defaultStore._id;
+    }
+  }
+};
+
+/**
+ * Helper to find matching store by customer address city / pinCode / location string
+ */
+const findMatchingStoreByLocation = async (address) => {
+  if (!address) return null;
+
+  if (address.city && String(address.city).trim() !== '') {
+    const matchedStore = await Store.findOne({
+      isDeleted: false,
+      location: { $regex: String(address.city).trim(), $options: 'i' },
+    }).select('_id');
+    if (matchedStore) return matchedStore._id;
+  }
+
+  if (address.pinCode && String(address.pinCode).trim() !== '') {
+    const matchedStore = await Store.findOne({
+      isDeleted: false,
+      location: { $regex: String(address.pinCode).trim(), $options: 'i' },
+    }).select('_id');
+    if (matchedStore) return matchedStore._id;
+  }
+
+  return null;
 };
 
 /**
@@ -34,17 +74,18 @@ export const sendOtp = async (req, res, next) => {
     if (customer) {
       customer.otp = otp;
       customer.otpExpires = otpExpires;
-      if (storeId) customer.storeId = storeId;
+      await ensureCustomerStoreId(customer, storeId);
       await customer.save();
     } else {
-      customer = await Customer.create({
+      customer = new Customer({
         phone: cleanPhone,
         name: 'Customer',
-        storeId: storeId || null,
         otp,
         otpExpires,
         status: 'active',
       });
+      await ensureCustomerStoreId(customer, storeId);
+      await customer.save();
     }
 
     return res.status(200).json(
@@ -83,9 +124,7 @@ export const verifyOtp = async (req, res, next) => {
 
     customer.otp = null;
     customer.otpExpires = null;
-    if (storeId && !customer.storeId) {
-      customer.storeId = storeId;
-    }
+    await ensureCustomerStoreId(customer, storeId);
     await customer.save();
 
     const token = jwt.sign(
@@ -135,16 +174,18 @@ export const resendOtp = async (req, res, next) => {
     if (customer) {
       customer.otp = otp;
       customer.otpExpires = otpExpires;
+      await ensureCustomerStoreId(customer, storeId);
       await customer.save();
     } else {
-      customer = await Customer.create({
+      customer = new Customer({
         phone: cleanPhone,
         name: 'Customer',
-        storeId: storeId || null,
         otp,
         otpExpires,
         status: 'active',
       });
+      await ensureCustomerStoreId(customer, storeId);
+      await customer.save();
     }
 
     return res.status(200).json(
@@ -170,6 +211,11 @@ export const getProfile = async (req, res, next) => {
     const customer = await Customer.findById(req.customer._id);
     if (!customer) {
       return next(notFound('Customer profile not found.'));
+    }
+
+    if (!customer.storeId) {
+      await ensureCustomerStoreId(customer);
+      await customer.save();
     }
 
     return res.status(200).json(
@@ -281,6 +327,11 @@ export const saveCustomerLocation = async (req, res, next) => {
     if (isDefault || !customer.currentLocation) {
       customer.currentLocation = addedAddress;
       customer.address = computedFormatted;
+
+      const matchedStoreId = await findMatchingStoreByLocation(addedAddress);
+      if (matchedStoreId) {
+        customer.storeId = matchedStoreId;
+      }
     }
 
     await customer.save();
@@ -354,11 +405,100 @@ export const selectCustomerLocation = async (req, res, next) => {
     customer.currentLocation = targetAddress;
     customer.address = targetAddress.formattedAddress || `${targetAddress.flatNoStreetArea}, ${targetAddress.city}`;
 
+    const matchedStoreId = await findMatchingStoreByLocation(targetAddress);
+    if (matchedStoreId) {
+      customer.storeId = matchedStoreId;
+    }
+
     await customer.save();
 
     return res.status(200).json(
       successResponse({
         message: 'Selected location set as active delivery address',
+        data: {
+          currentLocation: customer.currentLocation,
+          addresses: customer.addresses,
+          customerAddressSummary: customer.address,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update Saved Location / Address
+ * PUT /api/customer/auth/location/:addressId
+ */
+export const updateCustomerAddress = async (req, res, next) => {
+  try {
+    const { addressId } = req.params;
+    const {
+      flatNoStreetArea,
+      city,
+      state,
+      country,
+      pinCode,
+      landmark,
+      latitude,
+      longitude,
+      addressType,
+      formattedAddress: customFormatted,
+      isDefault,
+    } = req.body;
+
+    const customer = await Customer.findById(req.customer._id);
+    if (!customer) {
+      return next(notFound('Customer profile not found.'));
+    }
+
+    if (!Array.isArray(customer.addresses) || customer.addresses.length === 0) {
+      return next(notFound('No saved addresses found.'));
+    }
+
+    const targetAddress = customer.addresses.id(addressId);
+    if (!targetAddress) {
+      return next(notFound('Address not found.'));
+    }
+
+    if (flatNoStreetArea !== undefined) targetAddress.flatNoStreetArea = flatNoStreetArea;
+    if (city !== undefined) targetAddress.city = city;
+    if (state !== undefined) targetAddress.state = state;
+    if (country !== undefined) targetAddress.country = country;
+    if (pinCode !== undefined) targetAddress.pinCode = pinCode;
+    if (landmark !== undefined) targetAddress.landmark = landmark;
+    if (addressType !== undefined) targetAddress.addressType = addressType;
+    if (latitude !== undefined && latitude !== null) targetAddress.latitude = Number(latitude);
+    if (longitude !== undefined && longitude !== null) targetAddress.longitude = Number(longitude);
+
+    const parts = [
+      targetAddress.flatNoStreetArea,
+      targetAddress.city,
+      targetAddress.state,
+      targetAddress.country,
+      targetAddress.pinCode ? `- ${targetAddress.pinCode}` : '',
+    ].filter(Boolean);
+    const computedFormatted = customFormatted || parts.join(', ');
+    targetAddress.formattedAddress = computedFormatted;
+
+    if (isDefault) {
+      customer.addresses.forEach((a) => {
+        a.isDefault = a._id.toString() === addressId;
+      });
+      targetAddress.isDefault = true;
+      customer.currentLocation = targetAddress;
+      customer.address = computedFormatted;
+    } else if (customer.currentLocation && customer.currentLocation._id?.toString() === addressId) {
+      customer.currentLocation = targetAddress;
+      customer.address = computedFormatted;
+    }
+
+    await customer.save();
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Saved address updated successfully',
         data: {
           currentLocation: customer.currentLocation,
           addresses: customer.addresses,
