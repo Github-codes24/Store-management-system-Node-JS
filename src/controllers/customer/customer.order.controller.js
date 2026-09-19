@@ -187,13 +187,17 @@ export const placeOrder = async (req, res, next) => {
     await customer.save();
 
     // Trigger customer notification
-    createCustomerNotificationHelper({
-      customerId: customer._id,
-      title: 'Order Placed',
-      message: `Your order #${newOrder.orderId} has been placed successfully.`,
-      type: 'Order',
-      actionUrl: `/orders/${newOrder._id}`,
-    }).catch((err) => console.error('Error creating order notification:', err));
+    try {
+      await createCustomerNotificationHelper({
+        customerId: customer._id,
+        title: 'Order Placed',
+        message: `Your order #${newOrder.orderId} has been placed successfully.`,
+        type: 'Order',
+        actionUrl: `/orders/${newOrder._id}`,
+      });
+    } catch (err) {
+      console.error('Error creating order notification:', err);
+    }
 
     return res.status(200).json(
       successResponse({
@@ -542,13 +546,17 @@ export const cancelOrder = async (req, res, next) => {
     await ord.save();
 
     // Trigger customer notification
-    createCustomerNotificationHelper({
-      customerId: customerId,
-      title: 'Order Cancelled',
-      message: `Your order #${ord.orderId} has been cancelled.`,
-      type: 'Order',
-      actionUrl: `/orders/${ord._id}`,
-    }).catch((err) => console.error('Error creating order cancel notification:', err));
+    try {
+      await createCustomerNotificationHelper({
+        customerId: customerId,
+        title: 'Order Cancelled',
+        message: `Your order #${ord.orderId} has been cancelled.`,
+        type: 'Order',
+        actionUrl: `/orders/${ord._id}`,
+      });
+    } catch (err) {
+      console.error('Error creating order cancel notification:', err);
+    }
 
     return res.status(200).json(
       successResponse({

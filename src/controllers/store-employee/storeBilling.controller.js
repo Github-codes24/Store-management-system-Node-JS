@@ -566,14 +566,24 @@ export const updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
-    if (order.customerId) {
-      createCustomerNotificationHelper({
-        customerId: order.customerId,
-        title: title || 'Order Status Update',
-        message: description || defaultDesc,
-        type: 'Order',
-        actionUrl: `/orders/${order._id}`,
-      }).catch((err) => console.error('Error creating customer notification in store status update:', err));
+    let targetCustomerId = order.customer?.customerId || order.customerId;
+    if (!targetCustomerId && order.customer?.phone) {
+      const custDoc = await Customer.findOne({ phone: order.customer.phone.trim() });
+      if (custDoc) targetCustomerId = custDoc._id;
+    }
+
+    if (targetCustomerId) {
+      try {
+        await createCustomerNotificationHelper({
+          customerId: targetCustomerId,
+          title: title || 'Order Status Update',
+          message: description || defaultDesc,
+          type: 'Order',
+          actionUrl: `/orders/${order._id}`,
+        });
+      } catch (err) {
+        console.error('Error creating customer notification in store status update:', err);
+      }
     }
 
     return res.status(200).json(

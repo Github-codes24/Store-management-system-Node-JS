@@ -1,6 +1,7 @@
 import StoreOrder from '../../models/storeOrder.model.js';
 import SellProduct from '../../models/sellProduct.model.js';
 import Store from '../../models/store.model.js';
+import Customer from '../../models/customer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
@@ -374,14 +375,24 @@ export const updateAdminOrderStatus = async (req, res, next) => {
 
     await order.save();
 
-    if (order.customerId) {
-      createCustomerNotificationHelper({
-        customerId: order.customerId,
-        title: title || 'Order Status Update',
-        message: description || defaultDesc,
-        type: 'Order',
-        actionUrl: `/orders/${order._id}`,
-      }).catch((err) => console.error('Error creating customer notification in admin status update:', err));
+    let targetCustomerId = order.customer?.customerId || order.customerId;
+    if (!targetCustomerId && order.customer?.phone) {
+      const custDoc = await Customer.findOne({ phone: order.customer.phone.trim() });
+      if (custDoc) targetCustomerId = custDoc._id;
+    }
+
+    if (targetCustomerId) {
+      try {
+        await createCustomerNotificationHelper({
+          customerId: targetCustomerId,
+          title: title || 'Order Status Update',
+          message: description || defaultDesc,
+          type: 'Order',
+          actionUrl: `/orders/${order._id}`,
+        });
+      } catch (err) {
+        console.error('Error creating customer notification in admin status update:', err);
+      }
     }
 
     return res.status(200).json(

@@ -163,4 +163,55 @@ describe('Customer Notifications Integration Tests', () => {
 
     expect(getRes.body.data.notifications.length).toBe(0);
   });
+
+  it('should generate customer notification when admin or store updates order status to Processing', async () => {
+    const StoreOrder = (await import('../../src/models/storeOrder.model.js')).default;
+    const testOrder = await StoreOrder.create({
+      orderId: 'OODR99999',
+      customer: {
+        name: 'Test Customer',
+        phone: '9876543210',
+        customerId,
+      },
+      orderStatus: 'Order Placed',
+      bills: [
+        {
+          billId: 'BILL99999',
+          billNumber: 1,
+          saleType: 'Online',
+          items: [{ product: new mongoose.Types.ObjectId(), productName: 'Test Item', sellingPrice: 100, quantity: 1, totalAmount: 100 }],
+          subtotal: 100,
+          netAmount: 100,
+        },
+      ],
+    });
+
+    // Register admin token
+    const adminRes = await request(app).post('/api/admin/auth/register').send({
+      name: 'Status Admin',
+      email: 'statusadmin@example.com',
+      password: 'password123',
+      role: 'superadmin',
+    });
+    const adminToken = adminRes.body.data.token;
+
+    // Update order status to Processing
+    const updateRes = await request(app)
+      .patch(`/api/admin/online-orders/${testOrder._id}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'Processing' });
+
+    expect(updateRes.status).toBe(200);
+
+    // Verify notification was created for customer
+    const notifRes = await request(app)
+      .get('/api/customer/notifications')
+      .set('Authorization', `Bearer ${customerToken}`);
+
+    expect(notifRes.status).toBe(200);
+    expect(notifRes.body.data.notifications.length).toBeGreaterThan(0);
+    const procNotif = notifRes.body.data.notifications.find((n) => n.title === 'Processing');
+    expect(procNotif).toBeDefined();
+    expect(procNotif.message).toContain('prepared for delivery');
+  });
 });
