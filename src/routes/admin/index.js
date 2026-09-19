@@ -94,6 +94,19 @@ router.use('/stores', storeRouter);
 // Store Employee Routes
 router.use('/store-employees', storeEmployeeRouter);
 
+import adminCmsRoutes from './adminCms.routes.js';
+
+// CMS Page Management Routes
+router.use('/cms', adminCmsRoutes);
+router.use('/terms-and-conditions', (req, res, next) => {
+  req.url = '/terms-and-conditions' + (req.url === '/' ? '' : req.url);
+  return adminCmsRoutes(req, res, next);
+});
+router.use('/privacy-policy', (req, res, next) => {
+  req.url = '/privacy-policy' + (req.url === '/' ? '' : req.url);
+  return adminCmsRoutes(req, res, next);
+});
+
 // System Settings Routes
 router.use('/settings', settingsRouter);
 

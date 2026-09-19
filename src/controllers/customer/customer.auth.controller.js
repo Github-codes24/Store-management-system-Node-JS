@@ -276,6 +276,10 @@ export const updateProfile = async (req, res, next) => {
 export const saveCustomerLocation = async (req, res, next) => {
   try {
     const {
+      fullName,
+      name,
+      mobileNumber,
+      phone,
       flatNoStreetArea = '',
       city = '',
       state = '',
@@ -294,10 +298,15 @@ export const saveCustomerLocation = async (req, res, next) => {
       return next(notFound('Customer profile not found.'));
     }
 
+    const recipientName = name || fullName || customer.name || 'Customer';
+    const recipientPhone = phone || mobileNumber || customer.phone || '';
+
     const parts = [flatNoStreetArea, city, state, country, pinCode ? `- ${pinCode}` : ''].filter(Boolean);
     const computedFormatted = customFormatted || parts.join(', ');
 
     const newAddress = {
+      name: recipientName,
+      phone: recipientPhone,
       addressType,
       flatNoStreetArea,
       city,
@@ -435,6 +444,10 @@ export const updateCustomerAddress = async (req, res, next) => {
   try {
     const { addressId } = req.params;
     const {
+      fullName,
+      name,
+      mobileNumber,
+      phone,
       flatNoStreetArea,
       city,
       state,
@@ -462,6 +475,11 @@ export const updateCustomerAddress = async (req, res, next) => {
       return next(notFound('Address not found.'));
     }
 
+    const recipientName = name !== undefined ? name : fullName;
+    const recipientPhone = phone !== undefined ? phone : mobileNumber;
+
+    if (recipientName !== undefined) targetAddress.name = String(recipientName).trim();
+    if (recipientPhone !== undefined) targetAddress.phone = String(recipientPhone).trim();
     if (flatNoStreetArea !== undefined) targetAddress.flatNoStreetArea = flatNoStreetArea;
     if (city !== undefined) targetAddress.city = city;
     if (state !== undefined) targetAddress.state = state;

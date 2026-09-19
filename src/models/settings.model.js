@@ -18,6 +18,16 @@ const settingsSchema = new mongoose.Schema(
       lowercase: true,
       default: 'support@companyname.com',
     },
+    supportTitle: {
+      type: String,
+      trim: true,
+      default: "We're here to help!",
+    },
+    supportSubtitle: {
+      type: String,
+      trim: true,
+      default: 'Contact us using the options below.',
+    },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Admin',

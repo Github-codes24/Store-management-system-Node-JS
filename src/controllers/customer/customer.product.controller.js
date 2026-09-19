@@ -1016,24 +1016,111 @@ export const getCustomerProductById = async (req, res, next) => {
 };
 
 /**
- * Get Active Offers for Customer App
+ * Get Offers for Customer App (Supporting tabs: All, Upcoming, Active, Expired)
+ * GET /api/customer/products/offers?tab=all|upcoming|active|expired
  */
-export const getCustomerOffers = async (_req, res, next) => {
+export const getCustomerOffers = async (req, res, next) => {
   try {
+    const { tab = 'all' } = req.query;
     const now = new Date();
-    const offers = await Offer.find({
-      isDeleted: false,
-      status: 'active',
-      validFrom: { $lte: now },
-      validTo: { $gte: now },
-    })
-      .select('name description discountType discountValue validFrom validTo products')
-      .sort({ createdAt: -1 });
+
+    const rawOffers = await Offer.find({ isDeleted: false })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    let upcomingCount = 0;
+    let activeCount = 0;
+    let expiredCount = 0;
+
+    const formattedOffers = rawOffers.map((off) => {
+      const validFrom = off.validFrom ? new Date(off.validFrom) : null;
+      const validTo = off.validTo ? new Date(off.validTo) : null;
+
+      let statusKey = 'active';
+      let statusBadge = 'Active';
+
+      if (validFrom && validFrom > now) {
+        statusKey = 'upcoming';
+        statusBadge = 'Upcoming';
+        upcomingCount++;
+      } else if (validTo && validTo < now) {
+        statusKey = 'expired';
+        statusBadge = 'Expired';
+        expiredCount++;
+      } else {
+        statusKey = 'active';
+        statusBadge = 'Active';
+        activeCount++;
+      }
+
+      const discountTag =
+        off.discountType === 'percentage'
+          ? `${off.discountValue}% OFF`
+          : `₹ ${off.discountValue} OFF`;
+
+      const scopeMap = {
+        store_only: 'All Store',
+        online_only: 'Online',
+        both: 'All Store & Online',
+      };
+      const scopeText = scopeMap[off.offersOn] || 'All Store & Online';
+
+      const formatDateStr = (d) => {
+        if (!d) return '';
+        return new Date(d).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+        });
+      };
+
+      const validityText = `${formatDateStr(off.validFrom)} - ${formatDateStr(off.validTo)}`;
+
+      let subtitle = off.description || 'All Products';
+      if (Array.isArray(off.products) && off.products.length > 0) {
+        subtitle = off.products.join(', ');
+      }
+
+      return {
+        _id: off._id,
+        name: off.name,
+        subtitle,
+        description: off.description || '',
+        status: statusKey,
+        statusBadge,
+        discountType: off.discountType,
+        discountValue: off.discountValue,
+        discountTag,
+        offersOn: off.offersOn || 'both',
+        scopeText,
+        validFrom: off.validFrom,
+        validTo: off.validTo,
+        validityText,
+        image: off.image || null,
+      };
+    });
+
+    const counts = {
+      all: formattedOffers.length,
+      upcoming: upcomingCount,
+      active: activeCount,
+      expired: expiredCount,
+    };
+
+    const targetTab = (tab || 'all').toLowerCase().trim();
+    let offers = formattedOffers;
+
+    if (targetTab !== 'all') {
+      offers = formattedOffers.filter((o) => o.status === targetTab);
+    }
 
     return res.status(200).json(
       successResponse({
-        message: 'Active offers retrieved successfully',
-        data: { offers },
+        message: 'Offers retrieved successfully',
+        data: {
+          counts,
+          offers,
+        },
       })
     );
   } catch (error) {

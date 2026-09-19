@@ -2,6 +2,16 @@ import mongoose from 'mongoose';
 
 const addressItemSchema = new mongoose.Schema(
   {
+    name: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    phone: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     addressType: {
       type: String,
       enum: ['Home', 'Work', 'Other'],
