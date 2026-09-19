@@ -285,6 +285,31 @@ const returnSchema = new mongoose.Schema(
   { _id: true, timestamps: true }
 );
 
+const statusHistoryItemSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    title: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: true }
+);
+
 const storeOrderSchema = new mongoose.Schema(
   {
     orderId: {
@@ -353,9 +378,15 @@ const storeOrderSchema = new mongoose.Schema(
     },
     orderStatus: {
       type: String,
-      enum: ['New', 'Processing', 'Out For Delivery', 'Delivered', 'Active', 'Completed', 'Partially Returned', 'Fully Returned', 'Cancelled'],
-      default: 'Completed',
+      enum: ['New', 'Order Placed', 'Processing', 'Out For Delivery', 'Delivered', 'Active', 'Completed', 'Partially Returned', 'Fully Returned', 'Cancelled'],
+      default: 'Order Placed',
     },
+    cancelReason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    statusHistory: [statusHistoryItemSchema],
     payments: [paymentRecordSchema],
   },
   {

@@ -513,7 +513,7 @@ export const getOrderById = async (req, res, next) => {
 export const updateOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, description } = req.body;
 
     if (!status) {
       return next(badRequest('Status is required'));
@@ -528,6 +528,41 @@ export const updateOrderStatus = async (req, res, next) => {
     }
 
     order.orderStatus = status;
+
+    if (!Array.isArray(order.statusHistory)) {
+      order.statusHistory = [];
+    }
+
+    const statusTitleMap = {
+      'New': 'Order Placed',
+      'Order Placed': 'Order Placed',
+      'Processing': 'Processing',
+      'Out For Delivery': 'Out for Delivery',
+      'Out for Delivery': 'Out for Delivery',
+      'Delivered': 'Delivered',
+      'Cancelled': 'Order Cancelled',
+    };
+
+    const statusDescMap = {
+      'New': 'Order has been placed.',
+      'Order Placed': 'Order has been placed.',
+      'Processing': 'Your order is being prepared for delivery.',
+      'Out For Delivery': 'Your order is out for delivery.',
+      'Out for Delivery': 'Your order is out for delivery.',
+      'Delivered': 'Order delivered successfully.',
+      'Cancelled': 'Order was cancelled by store.',
+    };
+
+    const title = statusTitleMap[status] || status;
+    const defaultDesc = statusDescMap[status] || `Order status updated to ${status}`;
+
+    order.statusHistory.push({
+      status,
+      title,
+      description: description || defaultDesc,
+      timestamp: new Date(),
+    });
+
     await order.save();
 
     return res.status(200).json(

@@ -323,17 +323,90 @@ export const getAdminOnlineOrderById = async (req, res, next) => {
 export const updateAdminOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, description } = req.body;
 
     if (!status) {
       return next(badRequest('Status is required'));
     }
 
+    const order = await StoreOrder.findOne({ _id: id, isDeleted: { $ne: true } });
+
+    if (!order) {
+      return next(notFound('Order not found'));
+    }
+
+    order.orderStatus = status;
+
+    if (!Array.isArray(order.statusHistory)) {
+      order.statusHistory = [];
+    }
+
+    const statusTitleMap = {
+      'New': 'Order Placed',
+      'Order Placed': 'Order Placed',
+      'Processing': 'Processing',
+      'Out For Delivery': 'Out for Delivery',
+      'Out for Delivery': 'Out for Delivery',
+      'Delivered': 'Delivered',
+      'Cancelled': 'Order Cancelled',
+    };
+
+    const statusDescMap = {
+      'New': 'Order has been placed.',
+      'Order Placed': 'Order has been placed.',
+      'Processing': 'Your order is being prepared for delivery.',
+      'Out For Delivery': 'Your order is out for delivery.',
+      'Out for Delivery': 'Your order is out for delivery.',
+      'Delivered': 'Order delivered successfully.',
+      'Cancelled': 'Order was cancelled.',
+    };
+
+    const title = statusTitleMap[status] || status;
+    const defaultDesc = statusDescMap[status] || `Order status updated to ${status}`;
+
+    order.statusHistory.push({
+      status,
+      title,
+      description: description || defaultDesc,
+      timestamp: new Date(),
+    });
+
+    await order.save();
+
+    return res.status(200).json(
+      successResponse({
+        message: `Order status updated to ${status}`,
+        data: order,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 6. Assign Store to Online Order (for Global / unassigned orders)
+ * PATCH /api/admin/online-orders/:id/assign-store
+ */
+export const assignAdminOrderStore = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { storeId } = req.body;
+
+    if (!storeId) {
+      return next(badRequest('Store ID is required'));
+    }
+
+    const targetStore = await Store.findById(storeId);
+    if (!targetStore) {
+      return next(notFound('Target store not found'));
+    }
+
     const order = await StoreOrder.findOneAndUpdate(
       { _id: id, isDeleted: { $ne: true } },
-      { $set: { orderStatus: status } },
+      { $set: { store: targetStore._id } },
       { new: true }
-    );
+    ).populate('store', 'name storeCode location');
 
     if (!order) {
       return next(notFound('Order not found'));
@@ -341,7 +414,7 @@ export const updateAdminOrderStatus = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: `Order status updated to ${status}`,
+        message: `Order successfully assigned to store: ${targetStore.name}`,
         data: order,
       })
     );
