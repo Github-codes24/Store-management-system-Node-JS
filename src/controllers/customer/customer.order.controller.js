@@ -7,6 +7,7 @@ import { buildCartPayload } from './customer.cart.controller.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
+import { createCustomerNotificationHelper } from './customerNotification.controller.js';
 
 /**
  * Format helper for Order Cards UI
@@ -184,6 +185,15 @@ export const placeOrder = async (req, res, next) => {
     customer.totalOrders = (customer.totalOrders || 0) + 1;
     customer.totalPurchase = (customer.totalPurchase || 0) + cartPayload.summary.totalAmount;
     await customer.save();
+
+    // Trigger customer notification
+    createCustomerNotificationHelper({
+      customerId: customer._id,
+      title: 'Order Placed',
+      message: `Your order #${newOrder.orderId} has been placed successfully.`,
+      type: 'Order',
+      actionUrl: `/orders/${newOrder._id}`,
+    }).catch((err) => console.error('Error creating order notification:', err));
 
     return res.status(200).json(
       successResponse({
@@ -530,6 +540,15 @@ export const cancelOrder = async (req, res, next) => {
     });
 
     await ord.save();
+
+    // Trigger customer notification
+    createCustomerNotificationHelper({
+      customerId: customerId,
+      title: 'Order Cancelled',
+      message: `Your order #${ord.orderId} has been cancelled.`,
+      type: 'Order',
+      actionUrl: `/orders/${ord._id}`,
+    }).catch((err) => console.error('Error creating order cancel notification:', err));
 
     return res.status(200).json(
       successResponse({

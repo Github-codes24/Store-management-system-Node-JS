@@ -4,6 +4,7 @@ import Store from '../../models/store.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
+import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
 
 /**
  * Format flexible date (DD/MM/YYYY, YYYY-MM-DD, ISO)
@@ -372,6 +373,16 @@ export const updateAdminOrderStatus = async (req, res, next) => {
     });
 
     await order.save();
+
+    if (order.customerId) {
+      createCustomerNotificationHelper({
+        customerId: order.customerId,
+        title: title || 'Order Status Update',
+        message: description || defaultDesc,
+        type: 'Order',
+        actionUrl: `/orders/${order._id}`,
+      }).catch((err) => console.error('Error creating customer notification in admin status update:', err));
+    }
 
     return res.status(200).json(
       successResponse({

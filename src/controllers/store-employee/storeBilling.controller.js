@@ -3,6 +3,7 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
+import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online)
@@ -564,6 +565,16 @@ export const updateOrderStatus = async (req, res, next) => {
     });
 
     await order.save();
+
+    if (order.customerId) {
+      createCustomerNotificationHelper({
+        customerId: order.customerId,
+        title: title || 'Order Status Update',
+        message: description || defaultDesc,
+        type: 'Order',
+        actionUrl: `/orders/${order._id}`,
+      }).catch((err) => console.error('Error creating customer notification in store status update:', err));
+    }
 
     return res.status(200).json(
       successResponse({
