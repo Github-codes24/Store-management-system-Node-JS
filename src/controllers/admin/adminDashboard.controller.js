@@ -5,6 +5,8 @@ import Customer from '../../models/customer.model.js';
 import StoreOrder from '../../models/storeOrder.model.js';
 import SellProduct from '../../models/sellProduct.model.js';
 import ProductPurchaseInvoice from '../../models/productPurchaseInvoice.model.js';
+import Retailer from '../../models/retailer.model.js';
+import Distributor from '../../models/distributor.model.js';
 import Notification from '../../models/notification.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { getKolkataTodayRange } from '../../utils/timezone.js';
@@ -138,12 +140,30 @@ const fetchStatsData = async () => {
   const todaySellProductRevenue = todaySellProductRevenueAgg[0]?.total || 0;
   const todayEarning = todayStoreOrderRevenue + todaySellProductRevenue;
 
+  // 6. Today's Orders
+  const [todayStoreOrdersCount, todaySellProductsCount] = await Promise.all([
+    StoreOrder.countDocuments({
+      orderStatus: { $ne: 'Cancelled' },
+      createdAt: { $gte: todayStart, $lte: todayEnd },
+    }),
+    SellProduct.countDocuments({
+      isDeleted: false,
+      status: { $ne: 'Cancelled' },
+      $or: [
+        { billDate: { $gte: todayStart, $lte: todayEnd } },
+        { billDate: null, createdAt: { $gte: todayStart, $lte: todayEnd } },
+      ],
+    }),
+  ]);
+  const todayOrdersCount = todayStoreOrdersCount + todaySellProductsCount;
+
   return {
     raw: {
       stores: storesCount,
       products: productsCount,
       customers: customersCount,
       orders: totalOrdersCount,
+      todayOrders: todayOrdersCount,
       revenue: Math.round(totalRevenue),
       todayEarning: Math.round(todayEarning),
       todayRevenue: Math.round(todayEarning),
@@ -153,6 +173,7 @@ const fetchStatsData = async () => {
       products: formatIndianNumber(productsCount),
       customers: formatIndianNumber(customersCount),
       orders: formatIndianNumber(totalOrdersCount),
+      todayOrders: formatIndianNumber(todayOrdersCount),
       revenue: formatCurrency(totalRevenue),
       todayEarning: formatCurrency(todayEarning),
       todayRevenue: formatCurrency(todayEarning),
@@ -433,6 +454,7 @@ export const getDashboardOverview = async (_req, res, next) => {
           products: statsResult.formatted.products,
           customers: statsResult.formatted.customers,
           orders: statsResult.formatted.orders,
+          todayOrders: statsResult.formatted.todayOrders,
           revenue: statsResult.formatted.revenue,
           todayEarning: statsResult.formatted.todayEarning,
           todayRevenue: statsResult.formatted.todayRevenue,
@@ -463,6 +485,7 @@ export const getDashboardStats = async (_req, res, next) => {
           products: statsResult.formatted.products,
           customers: statsResult.formatted.customers,
           orders: statsResult.formatted.orders,
+          todayOrders: statsResult.formatted.todayOrders,
           revenue: statsResult.formatted.revenue,
           todayEarning: statsResult.formatted.todayEarning,
           todayRevenue: statsResult.formatted.todayRevenue,
