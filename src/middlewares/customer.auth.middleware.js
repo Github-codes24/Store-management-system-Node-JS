@@ -37,4 +37,33 @@ const customerAuth = async (req, _res, next) => {
   }
 };
 
+export const optionalCustomerAuth = async (req, _res, next) => {
+  try {
+    const token =
+      req.cookies?.customerToken ||
+      (req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.split(' ')[1]
+        : null);
+
+    if (!token) {
+      req.customer = null;
+      return next();
+    }
+
+    const decoded = jwt.verify(token, env.CUSTOMER_JWT_SECRET);
+    const customer = await Customer.findById(decoded.id);
+
+    if (customer && customer.status === 'active') {
+      req.customer = customer;
+    } else {
+      req.customer = null;
+    }
+
+    next();
+  } catch (_error) {
+    req.customer = null;
+    next();
+  }
+};
+
 export default customerAuth;

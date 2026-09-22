@@ -3,6 +3,7 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
+import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online)
@@ -513,7 +514,7 @@ export const getOrderById = async (req, res, next) => {
 export const updateOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, description } = req.body;
 
     if (!status) {
       return next(badRequest('Status is required'));
@@ -528,7 +529,62 @@ export const updateOrderStatus = async (req, res, next) => {
     }
 
     order.orderStatus = status;
+
+    if (!Array.isArray(order.statusHistory)) {
+      order.statusHistory = [];
+    }
+
+    const statusTitleMap = {
+      'New': 'Order Placed',
+      'Order Placed': 'Order Placed',
+      'Processing': 'Processing',
+      'Out For Delivery': 'Out for Delivery',
+      'Out for Delivery': 'Out for Delivery',
+      'Delivered': 'Delivered',
+      'Cancelled': 'Order Cancelled',
+    };
+
+    const statusDescMap = {
+      'New': 'Order has been placed.',
+      'Order Placed': 'Order has been placed.',
+      'Processing': 'Your order is being prepared for delivery.',
+      'Out For Delivery': 'Your order is out for delivery.',
+      'Out for Delivery': 'Your order is out for delivery.',
+      'Delivered': 'Order delivered successfully.',
+      'Cancelled': 'Order was cancelled by store.',
+    };
+
+    const title = statusTitleMap[status] || status;
+    const defaultDesc = statusDescMap[status] || `Order status updated to ${status}`;
+
+    order.statusHistory.push({
+      status,
+      title,
+      description: description || defaultDesc,
+      timestamp: new Date(),
+    });
+
     await order.save();
+
+    let targetCustomerId = order.customer?.customerId || order.customerId;
+    if (!targetCustomerId && order.customer?.phone) {
+      const custDoc = await Customer.findOne({ phone: order.customer.phone.trim() });
+      if (custDoc) targetCustomerId = custDoc._id;
+    }
+
+    if (targetCustomerId) {
+      try {
+        await createCustomerNotificationHelper({
+          customerId: targetCustomerId,
+          title: title || 'Order Status Update',
+          message: description || defaultDesc,
+          type: 'Order',
+          actionUrl: `/orders/${order._id}`,
+        });
+      } catch (err) {
+        console.error('Error creating customer notification in store status update:', err);
+      }
+    }
 
     return res.status(200).json(
       successResponse({

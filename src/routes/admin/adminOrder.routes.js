@@ -5,6 +5,7 @@ import {
   getAdminOnlineOrders,
   getAdminOnlineOrderById,
   updateAdminOrderStatus,
+  assignAdminOrderStore,
 } from '../../controllers/admin/adminOrder.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
 
@@ -22,5 +23,6 @@ router.get('/online', getAdminOnlineOrders);
 router.get('/online/:id', getAdminOnlineOrderById);
 router.patch('/online/:id/status', updateAdminOrderStatus);
 router.put('/online/:id/status', updateAdminOrderStatus);
+router.patch('/online/:id/assign-store', assignAdminOrderStore);
 
 export default router;

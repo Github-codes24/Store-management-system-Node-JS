@@ -11,6 +11,7 @@ import {
   updateStockStatus,
 } from '../../controllers/admin/productStock.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../middlewares/permission.middleware.js';
 import validate from '../../middlewares/validate.middleware.js';
 import {
   adjustStockQuantitySchema,
@@ -26,21 +27,61 @@ const router = Router();
 // Apply admin authentication to all product stock routes
 router.use(adminAuth);
 
-router.get('/summary', getProductStockSummary);
-router.get('/export', validate(exportProductStocksQuerySchema), exportProductStocks);
+router.get('/summary', requirePermission('productStock', 'viewOnly'), getProductStockSummary);
+router.get(
+  '/export',
+  requirePermission('productStock', 'viewOnly'),
+  validate(exportProductStocksQuerySchema),
+  exportProductStocks
+);
 
-router.get('/', validate(getProductStocksQuerySchema), getProductStocks);
-router.get('/:id', getProductStockById);
+router.get(
+  '/',
+  requirePermission('productStock', 'viewOnly'),
+  validate(getProductStocksQuerySchema),
+  getProductStocks
+);
+router.get('/:id', requirePermission('productStock', 'viewOnly'), getProductStockById);
 
-router.put('/:id', validate(updateProductStockSchema), updateProductStock);
-router.patch('/:id', validate(updateProductStockSchema), updateProductStock);
+router.put(
+  '/:id',
+  requirePermission('productStock', 'modify'),
+  validate(updateProductStockSchema),
+  updateProductStock
+);
+router.patch(
+  '/:id',
+  requirePermission('productStock', 'modify'),
+  validate(updateProductStockSchema),
+  updateProductStock
+);
 
-router.patch('/:id/status', validate(updateStockStatusSchema), updateStockStatus);
-router.patch('/:id/adjust-stock', validate(adjustStockQuantitySchema), adjustStockQuantity);
+router.patch(
+  '/:id/status',
+  requirePermission('productStock', 'modifyStatus'),
+  validate(updateStockStatusSchema),
+  updateStockStatus
+);
+router.patch(
+  '/:id/adjust-stock',
+  requirePermission('productStock', 'modify'),
+  validate(adjustStockQuantitySchema),
+  adjustStockQuantity
+);
 
-router.post('/:id/print-barcode', validate(printBarcodeSchema), printBarcode);
-router.get('/:id/print-barcode', validate(printBarcodeSchema), printBarcode);
+router.post(
+  '/:id/print-barcode',
+  requirePermission('productStock', 'viewOnly'),
+  validate(printBarcodeSchema),
+  printBarcode
+);
+router.get(
+  '/:id/print-barcode',
+  requirePermission('productStock', 'viewOnly'),
+  validate(printBarcodeSchema),
+  printBarcode
+);
 
-router.delete('/:id', deleteProductStock);
+router.delete('/:id', requirePermission('productStock', 'delete'), deleteProductStock);
 
 export default router;

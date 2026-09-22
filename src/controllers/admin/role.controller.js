@@ -307,6 +307,10 @@ export const createRole = async (req, res, next) => {
       createdBy: req.admin?._id || null,
     });
 
+    if (subAdmin) {
+      await SubAdmin.findByIdAndUpdate(subAdmin, { roleId: newRole._id });
+    }
+
     const populatedRole = await Role.findById(newRole._id)
       .populate('subAdmin', 'employeeName designation email')
       .lean();
@@ -349,6 +353,10 @@ export const updateRole = async (req, res, next) => {
     if (permissions !== undefined) role.permissions = permissions;
 
     await role.save();
+
+    if (subAdmin) {
+      await SubAdmin.findByIdAndUpdate(subAdmin, { roleId: role._id });
+    }
 
     const updatedRole = await Role.findById(role._id)
       .populate('subAdmin', 'employeeName designation email')

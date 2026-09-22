@@ -9,6 +9,7 @@ import {
   deleteProductType,
 } from '../../../controllers/admin/product-management/productType.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import upload from '../../../config/storage.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
@@ -22,20 +23,36 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/dropdown', getProductTypeDropdown);
+router.get('/dropdown', requirePermission('productTypes', 'viewOnly'), getProductTypeDropdown);
 
 router
   .route('/')
-  .post(upload.any(), parseForm, validate(createProductTypeSchema), createProductType)
-  .get(getProductTypes);
+  .post(
+    requirePermission('productTypes', 'create'),
+    upload.any(),
+    parseForm,
+    validate(createProductTypeSchema),
+    createProductType
+  )
+  .get(requirePermission('productTypes', 'viewOnly'), getProductTypes);
 
 router
   .route('/:id')
-  .get(getProductTypeById)
-  .put(upload.any(), parseForm, validate(updateProductTypeSchema), updateProductType)
-  .delete(deleteProductType);
+  .get(requirePermission('productTypes', 'viewOnly'), getProductTypeById)
+  .put(
+    requirePermission('productTypes', 'modify'),
+    upload.any(),
+    parseForm,
+    validate(updateProductTypeSchema),
+    updateProductType
+  )
+  .delete(requirePermission('productTypes', 'delete'), deleteProductType);
 
-router.patch('/:id/status', validate(toggleStatusSchema), toggleProductTypeStatus);
+router.patch(
+  '/:id/status',
+  requirePermission('productTypes', 'modifyStatus'),
+  validate(toggleStatusSchema),
+  toggleProductTypeStatus
+);
 
 export default router;
-

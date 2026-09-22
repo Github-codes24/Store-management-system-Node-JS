@@ -76,6 +76,10 @@ const offerSchema = new mongoose.Schema(
       enum: ['active', 'inactive'],
       default: 'active',
     },
+    image: {
+      type: String,
+      default: null,
+    },
     isDeleted: {
       type: Boolean,
       default: false,
