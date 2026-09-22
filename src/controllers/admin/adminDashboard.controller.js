@@ -7,6 +7,7 @@ import SellProduct from '../../models/sellProduct.model.js';
 import ProductPurchaseInvoice from '../../models/productPurchaseInvoice.model.js';
 import Notification from '../../models/notification.model.js';
 import { successResponse } from '../../utils/api-response.js';
+import { getKolkataTodayRange } from '../../utils/timezone.js';
 
 /**
  * Format numbers using Indian numbering grouping (e.g. 6,64,254)
@@ -42,6 +43,8 @@ const formatTime = (date) => {
  * Fetch and compute all core dashboard statistics
  */
 const fetchStatsData = async () => {
+  const { start: todayStart, end: todayEnd } = getKolkataTodayRange();
+
   // 1. Total Stores (excluding soft-deleted)
   const storesCount = await Store.countDocuments({ isDeleted: false });
 
@@ -64,8 +67,13 @@ const fetchStatsData = async () => {
   });
   const totalOrdersCount = storeOrdersCount + sellProductsCount;
 
-  // 5. Total Revenue (StoreOrder net + SellProduct net)
-  const [storeOrderRevenueAgg, sellProductRevenueAgg] = await Promise.all([
+  // 5. Total Revenue & Today's Earning (StoreOrder net + SellProduct net)
+  const [
+    storeOrderRevenueAgg,
+    sellProductRevenueAgg,
+    todayStoreOrderRevenueAgg,
+    todaySellProductRevenueAgg,
+  ] = await Promise.all([
     StoreOrder.aggregate([
       { $match: { orderStatus: { $ne: 'Cancelled' } } },
       {
@@ -86,11 +94,49 @@ const fetchStatsData = async () => {
         },
       },
     ]),
+    StoreOrder.aggregate([
+      {
+        $match: {
+          orderStatus: { $ne: 'Cancelled' },
+          createdAt: { $gte: todayStart, $lte: todayEnd },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $ifNull: ['$totalOrderNet', { $ifNull: ['$netAmount', 0] }] },
+          },
+        },
+      },
+    ]),
+    SellProduct.aggregate([
+      {
+        $match: {
+          isDeleted: false,
+          status: { $ne: 'Cancelled' },
+          $or: [
+            { billDate: { $gte: todayStart, $lte: todayEnd } },
+            { billDate: null, createdAt: { $gte: todayStart, $lte: todayEnd } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ['$netAmount', 0] } },
+        },
+      },
+    ]),
   ]);
 
   const storeOrderRevenue = storeOrderRevenueAgg[0]?.total || 0;
   const sellProductRevenue = sellProductRevenueAgg[0]?.total || 0;
   const totalRevenue = storeOrderRevenue + sellProductRevenue;
+
+  const todayStoreOrderRevenue = todayStoreOrderRevenueAgg[0]?.total || 0;
+  const todaySellProductRevenue = todaySellProductRevenueAgg[0]?.total || 0;
+  const todayEarning = todayStoreOrderRevenue + todaySellProductRevenue;
 
   return {
     raw: {
@@ -99,6 +145,8 @@ const fetchStatsData = async () => {
       customers: customersCount,
       orders: totalOrdersCount,
       revenue: Math.round(totalRevenue),
+      todayEarning: Math.round(todayEarning),
+      todayRevenue: Math.round(todayEarning),
     },
     formatted: {
       stores: formatIndianNumber(storesCount),
@@ -106,6 +154,8 @@ const fetchStatsData = async () => {
       customers: formatIndianNumber(customersCount),
       orders: formatIndianNumber(totalOrdersCount),
       revenue: formatCurrency(totalRevenue),
+      todayEarning: formatCurrency(todayEarning),
+      todayRevenue: formatCurrency(todayEarning),
     },
   };
 };
@@ -384,6 +434,8 @@ export const getDashboardOverview = async (_req, res, next) => {
           customers: statsResult.formatted.customers,
           orders: statsResult.formatted.orders,
           revenue: statsResult.formatted.revenue,
+          todayEarning: statsResult.formatted.todayEarning,
+          todayRevenue: statsResult.formatted.todayRevenue,
           rawStats: statsResult.raw,
           charts,
           activities,
@@ -412,6 +464,8 @@ export const getDashboardStats = async (_req, res, next) => {
           customers: statsResult.formatted.customers,
           orders: statsResult.formatted.orders,
           revenue: statsResult.formatted.revenue,
+          todayEarning: statsResult.formatted.todayEarning,
+          todayRevenue: statsResult.formatted.todayRevenue,
           rawStats: statsResult.raw,
         },
       })

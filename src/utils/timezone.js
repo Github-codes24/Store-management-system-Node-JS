@@ -30,8 +30,8 @@ export const getKolkataDate = (date = new Date()) => {
 };
 
 export const getKolkataTodayRange = (date = new Date()) => {
-  const parts = getKolkataTimeParts(date);
-  const start = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 23, 59, 59, 999));
+  const kolkataDateStr = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const start = new Date(`${kolkataDateStr}T00:00:00.000+05:30`);
+  const end = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
   return { start, end };
 };
