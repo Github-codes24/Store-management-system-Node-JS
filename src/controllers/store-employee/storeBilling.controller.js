@@ -6,19 +6,71 @@ import { badRequest, notFound } from '../../utils/api-error.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
 
 /**
- * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online)
+ * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online).
+ * Finds the highest existing sequence number instead of naive countDocuments, avoiding duplicate key errors when records have gaps or were deleted.
  */
 const generateOrderId = async (saleType = 'Offline') => {
   const isOnline = (saleType || '').toLowerCase() === 'online';
   const prefix = isOnline ? 'OODR' : 'SODR';
+
+  // 1. Find the highest orderId in store orders matching this prefix
+  const latestOrder = await StoreOrder.findOne({
+    orderId: new RegExp(`^${prefix}\\d+`, 'i')
+  })
+    .sort({ orderId: -1 })
+    .collation({ locale: 'en', numericOrdering: true })
+    .select('orderId')
+    .lean();
+
+  let maxNum = 0;
+  if (latestOrder?.orderId) {
+    const match = latestOrder.orderId.match(new RegExp(`^${prefix}(\\d+)`, 'i'));
+    if (match) {
+      maxNum = parseInt(match[1], 10) || 0;
+    }
+  }
+
+  // 2. Also check if any nested bill has a higher orderId
+  const latestBillOrder = await StoreOrder.findOne({
+    'bills.orderId': new RegExp(`^${prefix}\\d+`, 'i')
+  })
+    .sort({ 'bills.orderId': -1 })
+    .collation({ locale: 'en', numericOrdering: true })
+    .select('bills.orderId')
+    .lean();
+
+  if (latestBillOrder?.bills?.length) {
+    for (const b of latestBillOrder.bills) {
+      const match = (b.orderId || '').match(new RegExp(`^${prefix}(\\d+)`, 'i'));
+      if (match) {
+        const num = parseInt(match[1], 10) || 0;
+        if (num > maxNum) maxNum = num;
+      }
+    }
+  }
+
+  // 3. Fallback: ensure nextNum is at least countDocuments
   const count = await StoreOrder.countDocuments({
-    $or: [
-      { orderId: new RegExp(`^${prefix}`, 'i') },
-      { 'bills.saleType': new RegExp(`^${isOnline ? 'Online' : 'Offline'}$`, 'i') }
-    ]
+    orderId: new RegExp(`^${prefix}`, 'i')
   });
-  const nextNum = String(count + 1).padStart(5, '0');
-  return `${prefix}${nextNum}`;
+  if (count > maxNum) {
+    maxNum = count;
+  }
+
+  let nextNum = maxNum + 1;
+  let candidateId = `${prefix}${String(nextNum).padStart(5, '0')}`;
+
+  // 4. Guarantee uniqueness by advancing if candidateId already exists
+  while (
+    await StoreOrder.exists({
+      $or: [{ orderId: candidateId }, { 'bills.orderId': candidateId }]
+    })
+  ) {
+    nextNum += 1;
+    candidateId = `${prefix}${String(nextNum).padStart(5, '0')}`;
+  }
+
+  return candidateId;
 };
 
 /**
@@ -313,10 +365,10 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     }
 
     // Generate unique Order ID for this specific bill (e.g. SODR00001 for Offline, OODR00001 for Online)
-    const thisBillOrderId = await generateOrderId(saleType);
+    let thisBillOrderId = await generateOrderId(saleType);
     const billNumber = order ? (order.bills.length + 1) : 1;
-    const sessionOrderId = order ? order.orderId : thisBillOrderId;
-    const billId = `INV-${thisBillOrderId}-${billNumber}`;
+    let sessionOrderId = order ? order.orderId : thisBillOrderId;
+    let billId = `INV-${thisBillOrderId}-${billNumber}`;
 
     const newBill = {
       orderId: thisBillOrderId,
@@ -354,27 +406,44 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       order.markModified('payments');
       await order.save();
     } else {
-      // Create new purchase order session
-      order = await StoreOrder.create({
-        orderId: sessionOrderId,
-        store: storeId,
-        employee: employeeId,
-        customer: {
-          name: customer.name.trim(),
-          phone: (customer.phone || '').trim(),
-          email: (customer.email || '').trim(),
-          address: (customer.address || '').trim(),
-          customerId: linkedCustomerId,
-        },
-        bills: [newBill],
-        returns: [],
-        payments: processedPayments,
-        totalOrderGross: newBill.grossAmount,
-        totalOrderNet: newBill.netAmount,
-        totalOrderPaid: calculatedPaidAmount,
-        totalOrderRefunded: 0,
-        orderStatus: isOnline ? 'New' : 'Completed',
-      });
+      // Create new purchase order session with concurrency collision retry
+      let created = false;
+      let attempts = 0;
+      while (!created && attempts < 5) {
+        try {
+          order = await StoreOrder.create({
+            orderId: sessionOrderId,
+            store: storeId,
+            employee: employeeId,
+            customer: {
+              name: customer.name.trim(),
+              phone: (customer.phone || '').trim(),
+              email: (customer.email || '').trim(),
+              address: (customer.address || '').trim(),
+              customerId: linkedCustomerId,
+            },
+            bills: [newBill],
+            returns: [],
+            payments: processedPayments,
+            totalOrderGross: newBill.grossAmount,
+            totalOrderNet: newBill.netAmount,
+            totalOrderPaid: calculatedPaidAmount,
+            totalOrderRefunded: 0,
+            orderStatus: isOnline ? 'New' : 'Completed',
+          });
+          created = true;
+        } catch (createErr) {
+          if (createErr?.code === 11000 && attempts < 4) {
+            attempts++;
+            thisBillOrderId = await generateOrderId(saleType);
+            sessionOrderId = thisBillOrderId;
+            newBill.orderId = thisBillOrderId;
+            newBill.billId = `INV-${thisBillOrderId}-${billNumber}`;
+          } else {
+            throw createErr;
+          }
+        }
+      }
     }
 
     return res.status(201).json(
