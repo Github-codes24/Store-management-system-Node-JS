@@ -136,7 +136,9 @@ export const getDashboardOverview = async (req, res, next) => {
             month: { $month: '$createdAt' },
           },
           ordersCount: { $sum: 1 },
-          revenueSum: { $sum: '$netAmount' },
+          revenueSum: {
+            $sum: { $ifNull: ['$totalOrderNet', { $ifNull: ['$netAmount', 0] }] },
+          },
         },
       },
     ]);
@@ -186,7 +188,7 @@ export const getDashboardOverview = async (req, res, next) => {
     // 4. Preview Widgets (Top 5 items)
     // Recent Orders (Fetch from both StoreOrder & SellProduct)
     const storeOrdersRaw = await StoreOrder.find({ ...getStoreFilter('store'), isDeleted: { $ne: true } })
-      .select('orderId netAmount customer createdAt')
+      .select('orderId totalOrderNet netAmount bills customer createdAt')
       .sort({ createdAt: -1 })
       .limit(5);
 
@@ -199,7 +201,7 @@ export const getDashboardOverview = async (req, res, next) => {
       ...storeOrdersRaw.map((o) => ({
         _id: o._id,
         orderId: o.orderId,
-        amount: o.netAmount,
+        amount: o.totalOrderNet ?? o.netAmount ?? o.bills?.[0]?.netAmount ?? 0,
         customerName: o.customer ? o.customer.name : 'Walk-in Customer',
         time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',
@@ -437,7 +439,7 @@ export const getSeeAllRecentOrders = async (req, res, next) => {
     }
 
     const storeOrdersRaw = await StoreOrder.find(storeOrderFilter)
-      .select('orderId netAmount customer createdAt')
+      .select('orderId totalOrderNet netAmount bills customer createdAt')
       .sort({ createdAt: -1 });
 
     const sellProductsRaw = await SellProduct.find(sellProductFilter)
@@ -448,7 +450,7 @@ export const getSeeAllRecentOrders = async (req, res, next) => {
       ...storeOrdersRaw.map((o) => ({
         _id: o._id,
         orderId: o.orderId,
-        amount: o.netAmount,
+        amount: o.totalOrderNet ?? o.netAmount ?? o.bills?.[0]?.netAmount ?? 0,
         customerName: o.customer ? o.customer.name : 'Walk-in Customer',
         time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',

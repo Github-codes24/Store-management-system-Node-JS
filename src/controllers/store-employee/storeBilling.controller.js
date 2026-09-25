@@ -203,9 +203,15 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
 
       const itemBatch = (item.batch || storeProd.batch || 'Default').trim();
-      const qty = parseInt(item.quantity, 10) || 1;
+      let rawQty = Number(item.quantity);
+      if (isNaN(rawQty) || rawQty <= 0) rawQty = 1;
+      // Guard against accidental barcode scans into quantity (barcodes are typically >= 8-13 digits)
+      if (rawQty > 9999) {
+        return next(badRequest(`Invalid quantity (${item.quantity}) for product "${storeProd.productName}". Maximum allowed quantity is 9999.`));
+      }
+      const qty = Math.floor(rawQty);
       const unitPrice = parseFloat(item.sellingPrice) || 0;
-      const itemTotal = parseFloat(item.totalAmount) || unitPrice * qty;
+      const itemTotal = unitPrice * qty;
 
       // Decrement stock from specific batch in storeProduct
       if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
