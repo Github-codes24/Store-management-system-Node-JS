@@ -1,1 +1,1 @@
-export const successResponse = ({ success = true, message = 'success', data, pagination } = {}) => ({ success, message, data, pagination });
+export const successResponse = ({ success = true, message = 'success', data, pagination, ...extra } = {}) => ({ success, message, data, pagination, ...extra });

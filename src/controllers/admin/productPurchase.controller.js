@@ -6,6 +6,7 @@ import { badRequest, conflict, notFound } from '../../utils/api-error.js';
 import { successResponse } from '../../utils/api-response.js';
 import { generateBarcode } from '../../utils/barcode.util.js';
 import { getPagination } from '../../utils/pagination.js';
+import { parseFlexibleDate } from '../../utils/date.util.js';
 
 export const createProductPurchase = async (req, res) => {
   const {
@@ -82,10 +83,16 @@ export const createProductPurchase = async (req, res) => {
     }
 
     const qty = Number(item.quantity);
+    const rawMfg = item.manufactureDate ?? item.manufacturingDate ?? item.mfgDate ?? item.manufacture_date;
+    const rawExp = item.expiryDate ?? item.expiringDate ?? item.expDate ?? item.expiry_date;
+    const parsedMfg = parseFlexibleDate(rawMfg);
+    const parsedExp = parseFlexibleDate(rawExp);
 
     // If product exists -> increase stock
     if (product) {
       product.stockQuantity += qty;
+      if (parsedMfg) product.manufactureDate = parsedMfg;
+      if (parsedExp) product.expiryDate = parsedExp;
       await product.save();
     } else {
       // Create NEW AdminProduct atomically
@@ -126,8 +133,8 @@ export const createProductPurchase = async (req, res) => {
         stockQuantity: qty, // initial stock set to purchased quantity
         minStockAlert: Number(item.minStockAlert || 0),
         reorderPoint: Number(item.reorderPoint || 0),
-        manufactureDate: item.manufactureDate ? new Date(item.manufactureDate) : null,
-        expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
+        manufactureDate: parsedMfg,
+        expiryDate: parsedExp,
         hsnCode: item.hsnCode || null,
         productImage:
           typeof (item.productImage || item.image) === 'string' &&
@@ -164,6 +171,8 @@ export const createProductPurchase = async (req, res) => {
       unit: item.unit || product.unit,
       gstPercentage: gstPct,
       totalAmount: lineTotal,
+      manufactureDate: parsedMfg,
+      expiryDate: parsedExp,
     });
   }
 

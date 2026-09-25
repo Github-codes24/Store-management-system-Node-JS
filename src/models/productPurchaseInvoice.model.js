@@ -52,6 +52,14 @@ const purchaseItemSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    manufactureDate: {
+      type: Date,
+      default: null,
+    },
+    expiryDate: {
+      type: Date,
+      default: null,
+    },
   },
   { _id: true }
 );

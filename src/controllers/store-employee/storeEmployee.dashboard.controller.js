@@ -3,8 +3,10 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
 import SellProduct from '../../models/sellProduct.model.js';
 import StoreOrder from '../../models/storeOrder.model.js';
+import Notification from '../../models/notification.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { getPagination } from '../../utils/pagination.js';
+import { batchPopulateCustomerMetrics } from '../../utils/customerMetrics.util.js';
 
 /**
  * Main Store Panel Dashboard Overview
@@ -256,7 +258,7 @@ export const getDashboardOverview = async (req, res, next) => {
       stock: p.stockQuantity,
     }));
 
-    // Expiring Products (Top 5 expiring within 30 days)
+    // Expiring Products (Top 5 expiring within 30 days / 1 month or already expired)
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
@@ -264,7 +266,7 @@ export const getDashboardOverview = async (req, res, next) => {
       ...getStoreFilter('storeId'),
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $gte: now, $lte: thirtyDaysFromNow },
+      expiryDate: { $ne: null, $lte: thirtyDaysFromNow },
     })
       .select('productName expiryDate stockQuantity')
       .sort({ expiryDate: 1 })
@@ -278,7 +280,7 @@ export const getDashboardOverview = async (req, res, next) => {
         _id: p._id,
         productName: p.productName,
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
-        daysLeft: `${daysLeft} Days`,
+        daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
         stock: p.stockQuantity,
       };
     });
@@ -397,6 +399,7 @@ export const getDashboardOverview = async (req, res, next) => {
             },
           },
           recentOrders: combinedRecentOrders,
+          recentActivities: combinedRecentOrders,
           recentCustomers,
           lowStockProducts,
           expiringProducts,
@@ -474,7 +477,166 @@ export const getSeeAllRecentOrders = async (req, res, next) => {
     return res.status(200).json(
       successResponse({
         message: 'Recent orders fetched successfully',
-        data: { orders },
+        data: { orders, activities: orders },
+        pagination,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * See All - Recent Activities (Paginated combined stream of Orders, Sales, Customers, and Notifications)
+ */
+export const getSeeAllRecentActivities = async (req, res, next) => {
+  try {
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
+    const { search, type, page = 1, limit = 10 } = req.query;
+
+    const getStoreFilter = (storeField = 'store') => {
+      if (!employeeStoreId) return {};
+      return {
+        $or: [
+          { [storeField]: employeeStoreId },
+          { [storeField]: employeeStoreId.toString() },
+          { [storeField]: null },
+          { [storeField]: { $exists: false } },
+        ],
+      };
+    };
+
+    const storeOrderFilter = { ...getStoreFilter('store'), isDeleted: { $ne: true } };
+    const sellProductFilter = { ...getStoreFilter('store'), isDeleted: false };
+    const customerFilter = { ...getStoreFilter('storeId'), status: 'active' };
+    const notificationFilter = { ...getStoreFilter('store'), isDeleted: { $ne: true } };
+
+    const [storeOrdersRaw, sellProductsRaw, customersRaw, notifsRaw] = await Promise.all([
+      StoreOrder.find(storeOrderFilter)
+        .select('orderId totalOrderNet netAmount bills customer orderStatus createdAt')
+        .sort({ createdAt: -1 })
+        .limit(200),
+      SellProduct.find(sellProductFilter)
+        .select('sellId netAmount billDate status createdAt')
+        .sort({ billDate: -1, createdAt: -1 })
+        .limit(200),
+      Customer.find(customerFilter)
+        .select('name phone email totalPurchase createdAt')
+        .sort({ createdAt: -1 })
+        .limit(100),
+      Notification.find(notificationFilter)
+        .select('title message type createdAt')
+        .sort({ createdAt: -1 })
+        .limit(100),
+    ]);
+
+    const activitiesList = [
+      ...storeOrdersRaw.map((o) => {
+        const amt = o.totalOrderNet ?? o.netAmount ?? o.bills?.[0]?.netAmount ?? 0;
+        const cust = o.customer ? o.customer.name : 'Walk-in Customer';
+        return {
+          _id: o._id,
+          id: o.orderId || o._id,
+          activityId: o.orderId || o._id,
+          title: `Store Order #${o.orderId || o._id}`,
+          description: `Order received from ${cust}`,
+          activity: `Order #${o.orderId || o._id} - ${cust}`,
+          type: 'Online Order',
+          category: 'order',
+          customerName: cust,
+          amount: amt,
+          status: o.orderStatus || 'Completed',
+          time: o.createdAt ? o.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: o.createdAt ? o.createdAt.toISOString().split('T')[0] : '',
+          rawDate: o.createdAt,
+        };
+      }),
+      ...sellProductsRaw.map((s) => ({
+        _id: s._id,
+        id: s.sellId || s._id,
+        activityId: s.sellId || s._id,
+        title: `POS Sale #${s.sellId || s._id}`,
+        description: 'In-Store Sale completed',
+        activity: `POS Sale #${s.sellId || s._id} - Walk-in Customer`,
+        type: 'In-Store POS',
+        category: 'sale',
+        customerName: 'Walk-in Customer',
+        amount: s.netAmount || 0,
+        status: s.status || 'Paid',
+        time: s.billDate
+          ? s.billDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : s.createdAt
+            ? s.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+        date: s.billDate
+          ? s.billDate.toISOString().split('T')[0]
+          : s.createdAt
+            ? s.createdAt.toISOString().split('T')[0]
+            : '',
+        rawDate: s.billDate || s.createdAt,
+      })),
+      ...customersRaw.map((c) => ({
+        _id: c._id,
+        id: c._id,
+        activityId: c._id,
+        title: `Customer Registered: ${c.name}`,
+        description: `New customer registered with mobile ${c.phone || '-'}`,
+        activity: `Customer '${c.name}' registered`,
+        type: 'Customer Registration',
+        category: 'customer',
+        customerName: c.name,
+        amount: c.totalPurchase || 0,
+        status: 'Active',
+        time: c.createdAt ? c.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: c.createdAt ? c.createdAt.toISOString().split('T')[0] : '',
+        rawDate: c.createdAt,
+      })),
+      ...notifsRaw.map((n) => ({
+        _id: n._id,
+        id: n._id,
+        activityId: n._id,
+        title: n.title,
+        description: n.message,
+        activity: n.title || n.message,
+        type: 'Notification',
+        category: 'notification',
+        customerName: '-',
+        amount: 0,
+        status: 'Delivered',
+        time: n.createdAt ? n.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        date: n.createdAt ? n.createdAt.toISOString().split('T')[0] : '',
+        rawDate: n.createdAt,
+      })),
+    ].sort((a, b) => new Date(b.rawDate) - new Date(a.rawDate));
+
+    let filtered = activitiesList;
+    if (type && type !== 'all' && type !== 'All') {
+      const t = type.toLowerCase();
+      filtered = filtered.filter(
+        (item) => item.type.toLowerCase().includes(t) || item.category.toLowerCase() === t
+      );
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (item) =>
+          String(item.activityId || '').toLowerCase().includes(q) ||
+          String(item.title || '').toLowerCase().includes(q) ||
+          String(item.customerName || '').toLowerCase().includes(q) ||
+          String(item.description || '').toLowerCase().includes(q) ||
+          String(item.type || '').toLowerCase().includes(q)
+      );
+    }
+
+    const total = filtered.length;
+    const pagination = getPagination({ page, limit, total });
+    const activities = filtered.slice(pagination.skip, pagination.skip + pagination.limit);
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Recent activities fetched successfully',
+        data: { activities, orders: activities },
         pagination,
       })
     );
@@ -520,10 +682,12 @@ export const getSeeAllRecentCustomers = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
 
     const customersRaw = await Customer.find(filter)
-      .select('name phone email totalPurchase amountDue createdAt')
+      .select('name phone email totalPurchase amountDue totalOrders createdAt')
       .sort({ createdAt: -1 })
       .skip(pagination.skip)
       .limit(pagination.limit);
+
+    await batchPopulateCustomerMetrics(customersRaw, employeeStoreId);
 
     const customers = customersRaw.map((c) => ({
       _id: c._id,
@@ -620,13 +784,14 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
     const filter = {
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $gte: now, $lte: maxExpiryDate },
+      expiryDate: { $ne: null, $lte: maxExpiryDate },
     };
 
     if (employeeStoreId) {
       filter.$or = [
         { storeId: employeeStoreId },
         { storeId: employeeStoreId.toString() },
+        { store: employeeStoreId },
         { storeId: null },
         { storeId: { $exists: false } },
       ];
@@ -640,7 +805,7 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
 
     const expiringRaw = await StoreProduct.find(filter)
-      .select('productName expiryDate stockQuantity batch')
+      .select('productName expiryDate stockQuantity batch batches')
       .sort({ expiryDate: 1 })
       .skip(pagination.skip)
       .limit(pagination.limit);
@@ -652,9 +817,9 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
       return {
         _id: p._id,
         productName: p.productName,
-        batch: p.batch || 'B1',
+        batch: p.batch || p.batches?.[0]?.batchNumber || 'B1',
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
-        daysLeft: `${daysLeft} Days`,
+        daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
         stock: p.stockQuantity,
       };
     });

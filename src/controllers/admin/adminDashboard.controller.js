@@ -432,7 +432,88 @@ const fetchActivitiesData = async (limit = 10) => {
   return activities.slice(0, limit);
 };
 
+/**
+ * Fetch products expiring within one month (30 days) for Dashboard display
+ */
+const fetchExpiringProductsData = async (limit = 10, days = 30) => {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const maxExpiryDate = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
 
+  const [adminExpiring, storeExpiring] = await Promise.all([
+    AdminProduct.find({
+      isDeleted: false,
+      status: 'active',
+      expiryDate: { $ne: null, $gte: startOfToday, $lte: maxExpiryDate },
+    })
+      .populate('category', 'name')
+      .populate('brand', 'name')
+      .populate('unit', 'name shortName')
+      .sort({ expiryDate: 1 })
+      .limit(limit),
+    StoreProduct.find({
+      isDeleted: false,
+      status: 'active',
+      expiryDate: { $ne: null, $gte: startOfToday, $lte: maxExpiryDate },
+    })
+      .populate('category', 'name categoryName')
+      .populate('brand', 'name')
+      .populate('unit', 'name shortName')
+      .populate('storeId', 'name storeCode')
+      .sort({ expiryDate: 1 })
+      .limit(limit),
+  ]);
+
+  const list = [];
+  const seenBarcodes = new Set();
+
+  adminExpiring.forEach((p) => {
+    const exp = new Date(p.expiryDate);
+    const diffTime = exp.getTime() - now.getTime();
+    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (p.barcode) seenBarcodes.add(p.barcode);
+
+    list.push({
+      _id: p._id,
+      id: p._id,
+      productName: p.productName,
+      barcode: p.barcode || '-',
+      brand: p.brand?.name || '—',
+      category: p.category?.name || '—',
+      expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
+      daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+      stock: p.stockQuantity,
+      unit: p.unit?.shortName || p.unit?.name || 'pc',
+      source: 'Admin Master',
+    });
+  });
+
+  storeExpiring.forEach((p) => {
+    if (list.length >= limit) return;
+    if (p.barcode && seenBarcodes.has(p.barcode)) return;
+
+    const exp = new Date(p.expiryDate);
+    const diffTime = exp.getTime() - now.getTime();
+    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    list.push({
+      _id: p._id,
+      id: p._id,
+      productName: p.productName,
+      barcode: p.barcode || '-',
+      brand: p.brand?.name || '—',
+      category: p.category?.name || p.category?.categoryName || '—',
+      expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
+      daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+      stock: p.stockQuantity,
+      unit: p.unit?.shortName || p.unit?.name || 'pc',
+      storeName: p.storeId?.name || null,
+      source: 'Store Inventory',
+    });
+  });
+
+  return list.slice(0, limit);
+};
 
 /**
  * Combined Admin Dashboard Overview
@@ -440,10 +521,11 @@ const fetchActivitiesData = async (limit = 10) => {
  */
 export const getDashboardOverview = async (_req, res, next) => {
   try {
-    const [statsResult, charts, activities] = await Promise.all([
+    const [statsResult, charts, activities, expiringProducts] = await Promise.all([
       fetchStatsData(),
       fetchChartsData(),
       fetchActivitiesData(10),
+      fetchExpiringProductsData(10, 30),
     ]);
 
     return res.status(200).json(
@@ -461,6 +543,7 @@ export const getDashboardOverview = async (_req, res, next) => {
           rawStats: statsResult.raw,
           charts,
           activities,
+          expiringProducts,
         },
       })
     );
@@ -519,6 +602,30 @@ export const getDashboardActivities = async (req, res, next) => {
 };
 
 /**
+ * Expiring Products Only Endpoint
+ * GET /api/admin/dashboard/expiring-products
+ */
+export const getDashboardExpiringProducts = async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const days = parseInt(req.query.days, 10) || 30;
+    const expiringProducts = await fetchExpiringProductsData(limit, days);
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Expiring products before one month retrieved successfully',
+        data: {
+          expiringProducts,
+          total: expiringProducts.length,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Charts Only Endpoint
  * GET /api/admin/dashboard/charts
  */
@@ -542,4 +649,5 @@ export default {
   getDashboardStats,
   getDashboardActivities,
   getDashboardCharts,
+  getDashboardExpiringProducts,
 };

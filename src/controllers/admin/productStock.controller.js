@@ -3,6 +3,8 @@ import { badRequest, notFound } from '../../utils/api-error.js';
 import { successResponse } from '../../utils/api-response.js';
 import { getPagination } from '../../utils/pagination.js';
 import { generateBarcodeSvg, generateBarcodePdfBuffer } from '../../utils/barcode.util.js';
+import { parseFlexibleDate } from '../../utils/date.util.js';
+import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 import ExcelJS from 'exceljs';
 
 /**
@@ -96,6 +98,7 @@ const buildProductStockFilter = (queryParams) => {
 /**
  * Get Product Stock List with pagination, search, and multi-field filters
  * Matching Figma Screen 1 & Screen 2
+ * Always prioritized by expiring and low stock products
  */
 export const getProductStocks = async (req, res, next) => {
   try {
@@ -117,18 +120,25 @@ export const getProductStocks = async (req, res, next) => {
     const total = await AdminProduct.countDocuments(filter);
     const pagination = getPagination({ page, limit, total });
 
-    const sortOption = {};
-    sortOption[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    const pipeline = buildExpiringAndLowStockPipeline({
+      filter,
+      pagination,
+      sortBy,
+      sortOrder,
+    });
 
-    const products = await AdminProduct.find(filter)
+    const sortedIds = await AdminProduct.aggregate(pipeline);
+    const idList = sortedIds.map((item) => item._id);
+
+    const docs = await AdminProduct.find({ _id: { $in: idList } })
       .populate('productType', 'name')
       .populate('category', 'name')
       .populate('subcategory', 'name')
       .populate('brand', 'name')
-      .populate('unit', 'name shortName')
-      .sort(sortOption)
-      .skip(pagination.skip)
-      .limit(pagination.limit);
+      .populate('unit', 'name shortName');
+
+    const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
+    const products = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
     const stockItems = products.map((product, index) => {
       const { statusText, statusCode } = computeStockStatus(product);
@@ -336,6 +346,24 @@ export const updateProductStock = async (req, res, next) => {
       throw notFound('Product stock record not found');
     }
 
+    const rawMfg =
+      updateData.manufactureDate ??
+      updateData.manufacturingDate ??
+      updateData.mfgDate ??
+      updateData.manufacture_date;
+    const rawExp =
+      updateData.expiryDate ??
+      updateData.expiringDate ??
+      updateData.expDate ??
+      updateData.expiry_date;
+
+    if (rawMfg !== undefined) {
+      updateData.manufactureDate = parseFlexibleDate(rawMfg);
+    }
+    if (rawExp !== undefined) {
+      updateData.expiryDate = parseFlexibleDate(rawExp);
+    }
+
     const updatedProduct = await AdminProduct.findByIdAndUpdate(
       id,
       { $set: updateData },
@@ -505,6 +533,8 @@ export const exportProductStocks = async (req, res, next) => {
         purchasePrice: p.purchasePrice || 0,
         stockQuantity: p.stockQuantity,
         stockDisplay: `${p.stockQuantity} ${unitStr}`,
+        manufactureDate: p.manufactureDate ? p.manufactureDate.toISOString().split('T')[0] : '-',
+        expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '-',
         status: statusText,
         hsnCode: p.hsnCode || '-',
       };
@@ -520,9 +550,9 @@ export const exportProductStocks = async (req, res, next) => {
     }
 
     if (format === 'csv') {
-      let csvContent = 'Sr.No.,Product Name,Barcode,Brand,Category,MRP,Online Price,Offline Price,Stock,Status,HSN Code\n';
+      let csvContent = 'Sr.No.,Product Name,Barcode,Brand,Category,MRP,Online Price,Offline Price,Stock,Manufacture Date,Expiry Date,Status,HSN Code\n';
       exportRows.forEach((r) => {
-        csvContent += `"${r.srNo}","${r.productName.replace(/"/g, '""')}","${r.barcode}","${r.brand}","${r.category}",${r.mrp},${r.onlinePrice},${r.offlinePrice},"${r.stockDisplay}","${r.status}","${r.hsnCode}"\n`;
+        csvContent += `"${r.srNo}","${r.productName.replace(/"/g, '""')}","${r.barcode}","${r.brand}","${r.category}",${r.mrp},${r.onlinePrice},${r.offlinePrice},"${r.stockDisplay}","${r.manufactureDate}","${r.expiryDate}","${r.status}","${r.hsnCode}"\n`;
       });
 
       res.setHeader('Content-Type', 'text/csv');
@@ -544,6 +574,8 @@ export const exportProductStocks = async (req, res, next) => {
       { header: 'Online Price (₹)', key: 'onlinePrice', width: 16 },
       { header: 'Offline Price (₹)', key: 'offlinePrice', width: 16 },
       { header: 'Stock', key: 'stockDisplay', width: 14 },
+      { header: 'Mfg Date', key: 'manufactureDate', width: 14 },
+      { header: 'Expiry Date', key: 'expiryDate', width: 14 },
       { header: 'Status', key: 'status', width: 15 },
       { header: 'HSN Code', key: 'hsnCode', width: 15 },
     ];

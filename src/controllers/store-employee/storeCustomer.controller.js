@@ -4,6 +4,10 @@ import Store from '../../models/store.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, conflict, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
+import {
+  calculateCustomerMetrics,
+  batchPopulateCustomerMetrics,
+} from '../../utils/customerMetrics.util.js';
 
 /**
  * Create a new Customer for the logged-in Store
@@ -115,6 +119,9 @@ export const getCustomers = async (req, res, next) => {
       .skip(pagination.skip)
       .limit(pagination.limit);
 
+    // Populate accurate real-time metrics (totalPurchase, amountDue, totalOrders) from StoreOrders
+    await batchPopulateCustomerMetrics(customers, storeId);
+
     return res.status(200).json(
       successResponse({
         message: 'Store customers fetched successfully',
@@ -135,41 +142,35 @@ export const getCustomerById = async (req, res, next) => {
     const storeId = req.storeEmployee?.storeId;
     const { id } = req.params;
 
-    const customer = await Customer.findOne({ _id: id, storeId });
+    if (!mongoose.isValidObjectId(id)) {
+      return next(notFound('Customer not found in this store'));
+    }
+
+    const customer = await Customer.findOne({
+      _id: id,
+      ...(storeId ? { $or: [{ storeId }, { storeId: null }] } : {}),
+    });
     if (!customer) {
       return next(notFound('Customer not found in this store'));
     }
 
-    // Calculated metrics & summary analytics matching UI design
-    const totalOrders = customer.totalOrders || 0;
-    const totalBillAmount = customer.totalPurchase || 0;
-    const totalDueAmount = customer.amountDue || 0;
+    // Calculate real metrics, real spent chart, top products, and bills from StoreOrders
+    const metrics = await calculateCustomerMetrics(customer, storeId);
 
-    const summary = {
-      avgStoreVisitsPerMonth: customer.totalStoreVisits ? Math.round(customer.totalStoreVisits / 12) || 1 : 0,
-      totalStoreVisits: customer.totalStoreVisits || 0,
-      avgMonthlyBillValue: totalOrders ? Math.round(totalBillAmount / Math.max(totalOrders, 1)) : 0,
-    };
-
-    // Spent chart dataset (Monthly breakdown)
-    const spentChart = [
-      { month: 'Jan', amount: Math.round(totalBillAmount * 0.1) },
-      { month: 'Feb', amount: Math.round(totalBillAmount * 0.15) },
-      { month: 'Mar', amount: Math.round(totalBillAmount * 0.08) },
-      { month: 'Apr', amount: Math.round(totalBillAmount * 0.14) },
-      { month: 'May', amount: Math.round(totalBillAmount * 0.22) },
-      { month: 'Jun', amount: Math.round(totalBillAmount * 0.16) },
-      { month: 'Jul', amount: Math.round(totalBillAmount * 0.15) },
-    ];
-
-    // Top 5 purchased products placeholder/summary
-    const topPurchasedProducts = [
-      { item: 'Product 1', quantity: '150 pc' },
-      { item: 'Product 2', quantity: '50 kg' },
-      { item: 'Product 3', quantity: '150 pc' },
-      { item: 'Product 4', quantity: '150 pc' },
-      { item: 'Product 5', quantity: '150 pc' },
-    ];
+    // Synchronize to customer record if changed
+    if (
+      customer.totalPurchase !== metrics.totalBillAmount ||
+      customer.amountDue !== metrics.totalDueAmount ||
+      customer.totalOrders !== metrics.totalOrders
+    ) {
+      customer.totalPurchase = metrics.totalBillAmount;
+      customer.amountDue = metrics.totalDueAmount;
+      customer.totalOrders = metrics.totalOrders;
+      if (!customer.totalStoreVisits || customer.totalStoreVisits < metrics.summary.totalStoreVisits) {
+        customer.totalStoreVisits = metrics.summary.totalStoreVisits;
+      }
+      await customer.save().catch(() => {});
+    }
 
     return res.status(200).json(
       successResponse({
@@ -177,13 +178,15 @@ export const getCustomerById = async (req, res, next) => {
         data: {
           customer,
           purchaseInformation: {
-            totalOrders,
-            totalBillAmount,
-            totalDueAmount,
+            totalOrders: metrics.totalOrders,
+            totalBillAmount: metrics.totalBillAmount,
+            totalDueAmount: metrics.totalDueAmount,
           },
-          summary,
-          spentChart,
-          topPurchasedProducts,
+          summary: metrics.summary,
+          spentChart: metrics.spentChart,
+          topPurchasedProducts: metrics.topPurchasedProducts,
+          bills: metrics.bills,
+          orders: metrics.orders,
         },
       })
     );
@@ -340,6 +343,7 @@ export const exportCustomers = async (req, res, next) => {
     }
 
     const customers = await Customer.find(filter).sort({ createdAt: -1 });
+    await batchPopulateCustomerMetrics(customers, storeId);
 
     const exportData = customers.map((c, index) => ({
       srNo: index + 1,

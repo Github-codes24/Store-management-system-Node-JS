@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getDashboardOverview,
   getSeeAllRecentOrders,
+  getSeeAllRecentActivities,
   getSeeAllRecentCustomers,
   getSeeAllLowStockProducts,
   getSeeAllExpiringProducts,
@@ -15,6 +16,7 @@ router.use(storeEmployeeAuth);
 
 router.get('/', getDashboardOverview);
 router.get('/recent-orders', getSeeAllRecentOrders);
+router.get('/recent-activities', getSeeAllRecentActivities);
 router.get('/recent-customers', getSeeAllRecentCustomers);
 router.get('/low-stock-products', getSeeAllLowStockProducts);
 router.get('/expiring-products', getSeeAllExpiringProducts);

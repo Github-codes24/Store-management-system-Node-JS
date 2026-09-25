@@ -8,6 +8,8 @@ import Unit from '../../models/unit.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
+import { parseFlexibleDate } from '../../utils/date.util.js';
+import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 
 /**
  * Compute display status for store products
@@ -48,6 +50,8 @@ export const getAdminStoreProducts = async (req, res, next) => {
       subcategory,
       brand,
       status,
+      sortBy,
+      sortOrder = 'desc',
       page = 1,
       limit = 10,
     } = req.query;
@@ -145,18 +149,27 @@ export const getAdminStoreProducts = async (req, res, next) => {
 
     const total = await StoreProduct.countDocuments(filter);
     const pagination = getPagination({ page, limit, total });
-    const { limit: queryLimit, skip } = pagination;
 
-    const productsRaw = await StoreProduct.find(filter)
+    const pipeline = buildExpiringAndLowStockPipeline({
+      filter,
+      pagination,
+      sortBy,
+      sortOrder,
+    });
+
+    const sortedIds = await StoreProduct.aggregate(pipeline);
+    const idList = sortedIds.map((item) => item._id);
+
+    const docs = await StoreProduct.find({ _id: { $in: idList } })
       .populate('brand', 'name')
       .populate('category', 'name categoryName')
       .populate('subcategory', 'name subcategoryName')
       .populate('productType', 'name')
       .populate('unit', 'name shortName nameHindi')
-      .populate('storeId', 'name storeCode location')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(queryLimit);
+      .populate('storeId', 'name storeCode location');
+
+    const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
+    const productsRaw = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
     const products = productsRaw.map((p) => {
       const displayStatus = computeDisplayStatus(p);
@@ -187,6 +200,7 @@ export const getAdminStoreProducts = async (req, res, next) => {
         barcode: p.barcode || '—',
         batchNumber: p.batch || (p.batches && p.batches.length > 0 ? p.batches[0].batchNumber : 'B240701A'),
         batches: p.batches || [],
+        manufactureDate: p.manufactureDate ? p.manufactureDate.toISOString().split('T')[0] : null,
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : null,
         imageUrl: p.productImage || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500&h=500&fit=crop',
         store: p.storeId ? { id: p.storeId._id, name: p.storeId.name, storeCode: p.storeId.storeCode } : null,
@@ -325,7 +339,18 @@ export const updateAdminStoreProduct = async (req, res, next) => {
     if (updateData.status !== undefined) product.status = updateData.status.toLowerCase();
     if (updateData.batch !== undefined) product.batch = updateData.batch.trim();
     if (updateData.batches !== undefined && Array.isArray(updateData.batches)) product.batches = updateData.batches;
-    if (updateData.expiryDate !== undefined) product.expiryDate = updateData.expiryDate ? new Date(updateData.expiryDate) : null;
+    const rawMfg =
+      updateData.manufactureDate ??
+      updateData.manufacturingDate ??
+      updateData.mfgDate ??
+      updateData.manufacture_date;
+    const rawExp =
+      updateData.expiryDate ??
+      updateData.expiringDate ??
+      updateData.expDate ??
+      updateData.expiry_date;
+    if (rawMfg !== undefined) product.manufactureDate = parseFlexibleDate(rawMfg);
+    if (rawExp !== undefined) product.expiryDate = parseFlexibleDate(rawExp);
     if (updateData.productImage !== undefined) product.productImage = updateData.productImage;
 
     await product.save();

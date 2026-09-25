@@ -12,6 +12,7 @@ import { generateBarcode, generateBarcodeSvg, generateBarcodePdfBuffer } from '.
 import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
+import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 import ExcelJS from 'exceljs';
 
 /**
@@ -146,18 +147,25 @@ export const getStoreProducts = async (req, res, next) => {
     const total = await StoreProduct.countDocuments(filter);
     const pagination = getPagination({ page, limit, total });
 
-    const sortOption = {};
-    sortOption[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    const pipeline = buildExpiringAndLowStockPipeline({
+      filter,
+      pagination,
+      sortBy,
+      sortOrder,
+    });
 
-    const products = await StoreProduct.find(filter)
+    const sortedIds = await StoreProduct.aggregate(pipeline);
+    const idList = sortedIds.map((item) => item._id);
+
+    const docs = await StoreProduct.find({ _id: { $in: idList } })
       .populate('productType', 'name')
       .populate('category', 'name')
       .populate('subcategory', 'name')
       .populate('brand', 'name')
-      .populate('unit', 'name shortName')
-      .sort(sortOption)
-      .skip(pagination.skip)
-      .limit(pagination.limit);
+      .populate('unit', 'name shortName');
+
+    const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
+    const products = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
     const stockItems = products.map((product, index) => {
       const { statusText, statusCode } = computeStockStatus(product);
@@ -178,6 +186,7 @@ export const getStoreProducts = async (req, res, next) => {
         subcategory: product.subcategory,
         batchType: product.batchType,
         batch: product.batch,
+        batches: Array.isArray(product.batches) ? product.batches : [],
         unit: product.unit,
         unitShortName,
         piece: product.piece,
@@ -298,8 +307,20 @@ export const createStoreProduct = async (req, res, next) => {
     const createdBy = req.storeEmployee?._id || null;
     const incomingQty = Number(stockQuantity) || 0;
     const alertQty = Number(alertQuantity !== undefined ? alertQuantity : minStockAlert) || 0;
-    const parsedExpiryDate = parseFlexibleDate(expiryDate);
-    const parsedManufactureDate = parseFlexibleDate(manufactureDate);
+
+    const rawMfg =
+      manufactureDate ??
+      req.body.manufacturingDate ??
+      req.body.mfgDate ??
+      req.body.manufacture_date;
+    const rawExp =
+      expiryDate ??
+      req.body.expiringDate ??
+      req.body.expDate ??
+      req.body.expiry_date;
+
+    const parsedExpiryDate = parseFlexibleDate(rawExp);
+    const parsedManufactureDate = parseFlexibleDate(rawMfg);
 
     // Process image
     const imageUrl = await processUploadedFile(req.file, productImage, req);
@@ -316,7 +337,7 @@ export const createStoreProduct = async (req, res, next) => {
 
     // Barcode resolution
     let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
-    const resolvedBatchCode = (batch || newBatchCode || '').trim();
+    const resolvedBatchCode = (batch || req.body?.newBatchCode || '').trim();
 
     if (finalBarcode !== '') {
       // Check if product with this barcode already exists in this store
@@ -327,8 +348,7 @@ export const createStoreProduct = async (req, res, next) => {
       });
 
       if (existingProduct) {
-        // INCREASE INVENTORY for existing product
-        existingProduct.stockQuantity = (Number(existingProduct.stockQuantity) || 0) + incomingQty;
+        // Update/increase inventory for existing product
         if (cleanProductName) existingProduct.productName = cleanProductName;
         if (productType) existingProduct.productType = productType;
         if (category) existingProduct.category = category;
@@ -358,20 +378,27 @@ export const createStoreProduct = async (req, res, next) => {
           existingProduct.batches = [];
         }
 
+        const isNewBatch = (batchType || '').trim().toLowerCase() === 'new batch';
+
         if (resolvedBatchCode) {
           const batchIndex = existingProduct.batches.findIndex(
             (b) => b.batchNumber && b.batchNumber.toLowerCase() === resolvedBatchCode.toLowerCase()
           );
 
-          if (batchIndex >= 0) {
-            existingProduct.batches[batchIndex].stockQuantity =
-              (Number(existingProduct.batches[batchIndex].stockQuantity) || 0) + incomingQty;
+          if (batchIndex >= 0 && !isNewBatch) {
+            // Update existing batch stock directly to the target stock value entered by user
+            existingProduct.batches[batchIndex].stockQuantity = incomingQty;
             if (mrp !== undefined && !isNaN(Number(mrp))) existingProduct.batches[batchIndex].mrp = Number(mrp);
             if (offlineSellingPrice !== undefined && !isNaN(Number(offlineSellingPrice))) existingProduct.batches[batchIndex].offlineSellingPrice = Number(offlineSellingPrice);
             if (onlineSellingPrice !== undefined && !isNaN(Number(onlineSellingPrice))) existingProduct.batches[batchIndex].onlineSellingPrice = Number(onlineSellingPrice);
             if (manufactureDate !== undefined) existingProduct.batches[batchIndex].manufactureDate = parsedManufactureDate;
             if (expiryDate !== undefined) existingProduct.batches[batchIndex].expiryDate = parsedExpiryDate;
+          } else if (batchIndex >= 0 && isNewBatch) {
+            // If same batch number exists and user marked new batch, add quantity
+            existingProduct.batches[batchIndex].stockQuantity =
+              (Number(existingProduct.batches[batchIndex].stockQuantity) || 0) + incomingQty;
           } else {
+            // Add new batch with given stock
             existingProduct.batches.push({
               batchNumber: resolvedBatchCode,
               stockQuantity: incomingQty,
@@ -384,6 +411,14 @@ export const createStoreProduct = async (req, res, next) => {
           }
           existingProduct.batch = resolvedBatchCode;
           existingProduct.batchType = batchType ? String(batchType).trim() : 'Old Batch';
+
+          // Recalculate total product stock quantity as sum of all batches
+          existingProduct.stockQuantity = existingProduct.batches.reduce(
+            (sum, b) => sum + (Number(b.stockQuantity) || 0),
+            0
+          );
+        } else {
+          existingProduct.stockQuantity = incomingQty;
         }
 
         await existingProduct.save();
@@ -561,11 +596,44 @@ export const updateStoreProduct = async (req, res, next) => {
     if (updateData.purchasePrice !== undefined && !isNaN(Number(updateData.purchasePrice))) {
       updateData.purchasePrice = Number(updateData.purchasePrice);
     }
-    if (updateData.expiryDate !== undefined) {
-      updateData.expiryDate = parseFlexibleDate(updateData.expiryDate);
+    const rawExp =
+      updateData.expiryDate ??
+      updateData.expiringDate ??
+      updateData.expDate ??
+      updateData.expiry_date;
+    const rawMfg =
+      updateData.manufactureDate ??
+      updateData.manufacturingDate ??
+      updateData.mfgDate ??
+      updateData.manufacture_date;
+
+    if (rawExp !== undefined) {
+      updateData.expiryDate = parseFlexibleDate(rawExp);
     }
-    if (updateData.manufactureDate !== undefined) {
-      updateData.manufactureDate = parseFlexibleDate(updateData.manufactureDate);
+    if (rawMfg !== undefined) {
+      updateData.manufactureDate = parseFlexibleDate(rawMfg);
+    }
+
+    if (existingProduct.batches && existingProduct.batches.length > 0) {
+      const activeBatchName = updateData.batch || existingProduct.batch;
+      let batchToUpdate = existingProduct.batches.find(
+        (b) => b.batchNumber && b.batchNumber.toLowerCase() === String(activeBatchName).toLowerCase()
+      );
+      if (!batchToUpdate && existingProduct.batches.length === 1) {
+        batchToUpdate = existingProduct.batches[0];
+      }
+      if (batchToUpdate) {
+        if (updateData.mrp !== undefined && !isNaN(Number(updateData.mrp))) {
+          batchToUpdate.mrp = Number(updateData.mrp);
+        }
+        if (updateData.offlineSellingPrice !== undefined && !isNaN(Number(updateData.offlineSellingPrice))) {
+          batchToUpdate.offlineSellingPrice = Number(updateData.offlineSellingPrice);
+        }
+        if (updateData.onlineSellingPrice !== undefined && !isNaN(Number(updateData.onlineSellingPrice))) {
+          batchToUpdate.onlineSellingPrice = Number(updateData.onlineSellingPrice);
+        }
+        updateData.batches = existingProduct.batches;
+      }
     }
 
     const updatedProduct = await StoreProduct.findByIdAndUpdate(
@@ -933,7 +1001,7 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
     let product = await StoreProduct.findOne({
       barcode: cleanBarcode,
       isDeleted: false,
-      ...(storeId ? { storeId } : {}),
+      ...(storeId ? { $or: [{ storeId }, { storeId: null }] } : {}),
     })
       .populate('productType', 'name')
       .populate('category', 'name')

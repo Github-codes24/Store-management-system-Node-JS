@@ -4,9 +4,25 @@ import { successResponse } from '../../utils/api-response.js';
 import { generateBarcode } from '../../utils/barcode.util.js';
 import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
+import { parseFlexibleDate } from '../../utils/date.util.js';
+import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 
 export const createAdminProduct = async (req, res) => {
   let { barcode, productImage, image, ...productData } = req.body;
+
+  const rawMfg =
+    req.body.manufactureDate ??
+    req.body.manufacturingDate ??
+    req.body.mfgDate ??
+    req.body.manufacture_date;
+  const rawExp =
+    req.body.expiryDate ??
+    req.body.expiringDate ??
+    req.body.expDate ??
+    req.body.expiry_date;
+
+  const parsedManufactureDate = parseFlexibleDate(rawMfg);
+  const parsedExpiryDate = parseFlexibleDate(rawExp);
 
   let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
   if (finalBarcode !== '') {
@@ -40,6 +56,8 @@ export const createAdminProduct = async (req, res) => {
 
   const product = await AdminProduct.create({
     ...productData,
+    manufactureDate: parsedManufactureDate,
+    expiryDate: parsedExpiryDate,
     productName: productData.productName ? String(productData.productName).trim() : '',
     barcode: finalBarcode,
     productImage: imageUrl,
@@ -101,7 +119,7 @@ export const lookupByBarcode = async (req, res) => {
 };
 
 export const getAdminProducts = async (req, res) => {
-  const { page = 1, limit = 10, search, category, brand, productType, status } = req.query;
+  const { page = 1, limit = 10, search, category, brand, productType, status, sortBy, sortOrder = 'desc' } = req.query;
 
   const filter = { isDeleted: false };
 
@@ -130,15 +148,25 @@ export const getAdminProducts = async (req, res) => {
   const total = await AdminProduct.countDocuments(filter);
   const pagination = getPagination({ page, limit, total });
 
-  const products = await AdminProduct.find(filter)
+  const pipeline = buildExpiringAndLowStockPipeline({
+    filter,
+    pagination,
+    sortBy,
+    sortOrder,
+  });
+
+  const sortedIds = await AdminProduct.aggregate(pipeline);
+  const idList = sortedIds.map((item) => item._id);
+
+  const docs = await AdminProduct.find({ _id: { $in: idList } })
     .populate('productType', 'name')
     .populate('category', 'name')
     .populate('subcategory', 'name')
     .populate('brand', 'name')
-    .populate('unit', 'name shortName')
-    .sort({ createdAt: -1 })
-    .skip(pagination.skip)
-    .limit(pagination.limit);
+    .populate('unit', 'name shortName');
+
+  const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
+  const products = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
   return res.status(200).json(
     successResponse({
@@ -190,6 +218,24 @@ export const updateAdminProduct = async (req, res) => {
     if (existing) {
       throw conflict('An active product with this barcode already exists');
     }
+  }
+
+  const rawMfg =
+    updateData.manufactureDate ??
+    updateData.manufacturingDate ??
+    updateData.mfgDate ??
+    updateData.manufacture_date;
+  const rawExp =
+    updateData.expiryDate ??
+    updateData.expiringDate ??
+    updateData.expDate ??
+    updateData.expiry_date;
+
+  if (rawMfg !== undefined) {
+    updateData.manufactureDate = parseFlexibleDate(rawMfg);
+  }
+  if (rawExp !== undefined) {
+    updateData.expiryDate = parseFlexibleDate(rawExp);
   }
 
   const rawImage = productImage !== undefined ? productImage : image;

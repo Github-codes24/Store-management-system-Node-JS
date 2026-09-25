@@ -110,17 +110,118 @@ export const getAdminOfflineSales = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
     const { limit: queryLimit, skip } = pagination;
 
-    const ordersRaw = await StoreOrder.find(filter)
-      .populate('store', 'name storeCode location')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(queryLimit);
+    const [ordersRaw, statsOrders] = await Promise.all([
+      StoreOrder.find(filter)
+        .populate('store', 'name storeCode location')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(queryLimit)
+        .lean(),
+      StoreOrder.find(filter)
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .lean(),
+    ]);
+
+    let totalCash = 0;
+    let totalUPI = 0;
+    let totalCard = 0;
+
+    for (const o of statsOrders) {
+      let oCash = 0;
+      let oUpi = 0;
+      let oCard = 0;
+      const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
+        ? o.payments
+        : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
+        ? o.bills[0].payments
+        : [];
+
+      if (paymentsList.length > 0) {
+        for (const p of paymentsList) {
+          const mode = (p.mode || '').trim().toLowerCase();
+          const amt = Number(p.amount) || 0;
+          if (mode === 'cash') oCash += amt;
+          else if (mode === 'upi') oUpi += amt;
+          else if (mode === 'card' || mode.includes('card')) oCard += amt;
+        }
+      }
+
+      const firstBill = o.bills?.[0] || {};
+      const netAmount = Number(firstBill.netAmount ?? o.totalOrderNet ?? 0);
+      const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
+      const effective = Math.max(0, netAmount - refunded);
+      const paid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effective);
+
+      if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
+        const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
+        if (method === 'cash') oCash = paid;
+        else if (method === 'upi') oUpi = paid;
+        else if (method === 'card' || method.includes('card')) oCard = paid;
+        else if (effective > 0) oCash = paid;
+      }
+
+      if (refunded > 0 && effective >= 0) {
+        const recorded = oCash + oUpi + oCard;
+        if (recorded > effective && recorded > 0) {
+          const ratio = effective / recorded;
+          oCash *= ratio;
+          oUpi *= ratio;
+          oCard *= ratio;
+        }
+      }
+
+      totalCash += oCash;
+      totalUPI += oUpi;
+      totalCard += oCard;
+    }
 
     const data = ordersRaw.map((o) => {
       const allItems = o.bills?.flatMap((b) => b.items || []) || [];
       const totalBill = o.totalOrderNet !== undefined ? o.totalOrderNet : o.bills?.reduce((acc, b) => acc + (b.netAmount || 0), 0) || 0;
       const credit = o.totalOrderDue !== undefined ? o.totalOrderDue : o.bills?.reduce((acc, b) => acc + (b.dueAmount || 0), 0) || 0;
       const orderDate = o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-GB') : '—';
+
+      let oCash = 0;
+      let oUpi = 0;
+      let oCard = 0;
+      const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
+        ? o.payments
+        : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
+        ? o.bills[0].payments
+        : [];
+
+      if (paymentsList.length > 0) {
+        for (const p of paymentsList) {
+          const mode = (p.mode || '').trim().toLowerCase();
+          const amt = Number(p.amount) || 0;
+          if (mode === 'cash') oCash += amt;
+          else if (mode === 'upi') oUpi += amt;
+          else if (mode === 'card' || mode.includes('card')) oCard += amt;
+        }
+      }
+
+      const firstBill = o.bills?.[0] || {};
+      const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
+      const effectiveTotal = Math.max(0, totalBill - refunded);
+      const paidAmount = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effectiveTotal);
+
+      if (oCash === 0 && oUpi === 0 && oCard === 0 && paidAmount > 0) {
+        const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
+        if (method === 'cash') oCash = paidAmount;
+        else if (method === 'upi') oUpi = paidAmount;
+        else if (method === 'card' || method.includes('card')) oCard = paidAmount;
+        else if (effectiveTotal > 0) oCash = paidAmount;
+      }
+
+      if (refunded > 0 && effectiveTotal >= 0) {
+        const recorded = oCash + oUpi + oCard;
+        if (recorded > effectiveTotal && recorded > 0) {
+          const ratio = effectiveTotal / recorded;
+          oCash *= ratio;
+          oUpi *= ratio;
+          oCard *= ratio;
+        }
+      }
 
       return {
         _id: o._id,
@@ -133,6 +234,12 @@ export const getAdminOfflineSales = async (req, res, next) => {
         items: allItems,
         totalBill: `₹ ${Number(totalBill).toLocaleString('en-IN')}`,
         rawTotalBill: totalBill,
+        cash: oCash > 0 ? `₹ ${Math.round(oCash).toLocaleString('en-IN')}` : '-',
+        rawCash: oCash,
+        upi: oUpi > 0 ? `₹ ${Math.round(oUpi).toLocaleString('en-IN')}` : '-',
+        rawUpi: oUpi,
+        card: oCard > 0 ? `₹ ${Math.round(oCard).toLocaleString('en-IN')}` : '-',
+        rawCard: oCard,
         credit: `₹ ${Number(credit).toLocaleString('en-IN')}`,
         rawCredit: credit,
         date: orderDate,
@@ -149,6 +256,11 @@ export const getAdminOfflineSales = async (req, res, next) => {
       successResponse({
         message: 'Offline sales retrieved successfully',
         data,
+        stats: {
+          totalCash: Math.round(totalCash * 100) / 100,
+          totalUPI: Math.round(totalUPI * 100) / 100,
+          totalCard: Math.round(totalCard * 100) / 100,
+        },
         pagination,
       })
     );

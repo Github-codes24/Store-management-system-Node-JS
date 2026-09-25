@@ -13,7 +13,18 @@ export const getProductStocksQuerySchema = {
     brand: z.string().optional(),
     status: z.string().optional().default('all'),
     sortBy: z
-      .enum(['createdAt', 'productName', 'stockQuantity', 'mrp', 'offlineSellingPrice', 'onlineSellingPrice'])
+      .enum([
+        'createdAt',
+        'productName',
+        'stockQuantity',
+        'mrp',
+        'offlineSellingPrice',
+        'onlineSellingPrice',
+        'expiryDate',
+        'expiring',
+        'low_stock',
+        'expiring_low_stock',
+      ])
       .optional()
       .default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
@@ -34,8 +45,14 @@ export const updateProductStockSchema = {
       gstPercentage: z.coerce.number().min(0).max(100).optional(),
       cgstPercentage: z.coerce.number().min(0).max(100).optional(),
       sgstPercentage: z.coerce.number().min(0).max(100).optional(),
-      manufactureDate: z.string().optional().nullable(),
-      expiryDate: z.string().optional().nullable(),
+      manufactureDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      manufacturingDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      mfgDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      manufacture_date: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      expiryDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      expiringDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      expDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      expiry_date: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
       hsnCode: z.string().trim().optional().nullable().or(z.literal('')),
       status: z.enum(['active', 'inactive']).optional(),
     })

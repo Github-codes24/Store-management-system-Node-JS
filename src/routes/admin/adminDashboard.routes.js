@@ -4,6 +4,7 @@ import {
   getDashboardStats,
   getDashboardActivities,
   getDashboardCharts,
+  getDashboardExpiringProducts,
 } from '../../controllers/admin/adminDashboard.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
 
@@ -17,6 +18,7 @@ router.get('/overview', getDashboardOverview);
 router.get('/stats', getDashboardStats);
 router.get('/activities', getDashboardActivities);
 router.get('/charts', getDashboardCharts);
+router.get('/expiring-products', getDashboardExpiringProducts);
 router.get('/', getDashboardOverview);
 
 export default router;

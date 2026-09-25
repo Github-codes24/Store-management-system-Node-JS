@@ -4,6 +4,7 @@ import Customer from '../../models/customer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
+import { syncCustomerMetricsInDb } from '../../utils/customerMetrics.util.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online).
@@ -93,7 +94,7 @@ const generateReturnId = (orderId, returnNumber) => {
  */
 export const createOrAppendOrderBill = async (req, res, next) => {
   try {
-    const storeId = req.storeEmployee?.store || null;
+    const storeId = req.storeEmployee?.storeId || req.storeEmployee?.store || null;
     const employeeId = req.storeEmployee?._id || null;
 
     const {
@@ -356,6 +357,13 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       order.markModified('payments');
       await order.save();
 
+      // Synchronize customer's metrics in background / immediately
+      if (order.customer?.customerId) {
+        await syncCustomerMetricsInDb(order.customer.customerId).catch(() => {});
+      } else if (order.customer?.phone) {
+        await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+      }
+
       return res.status(200).json(
         successResponse({
           message: 'Bill updated successfully',
@@ -452,6 +460,14 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
+    // Synchronize customer's metrics in DB
+    const custId = order.customer?.customerId || linkedCustomerId;
+    if (custId) {
+      await syncCustomerMetricsInDb(custId).catch(() => {});
+    } else if (order.customer?.phone) {
+      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+    }
+
     return res.status(201).json(
       successResponse({
         message: 'Bill created successfully',
@@ -533,15 +549,78 @@ export const getStoreOrders = async (req, res, next) => {
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
     const skip = (pageNum - 1) * limitNum;
 
-    const [orders, total] = await Promise.all([
+    const [orders, total, statsOrders] = await Promise.all([
       StoreOrder.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
       StoreOrder.countDocuments(query),
+      StoreOrder.find(query)
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .lean(),
     ]);
+
+    let totalCash = 0;
+    let totalUPI = 0;
+    let totalCard = 0;
+
+    for (const o of statsOrders) {
+      let oCash = 0;
+      let oUpi = 0;
+      let oCard = 0;
+      const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
+        ? o.payments
+        : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
+        ? o.bills[0].payments
+        : [];
+
+      if (paymentsList.length > 0) {
+        for (const p of paymentsList) {
+          const mode = (p.mode || '').trim().toLowerCase();
+          const amt = Number(p.amount) || 0;
+          if (mode === 'cash') oCash += amt;
+          else if (mode === 'upi') oUpi += amt;
+          else if (mode === 'card' || mode.includes('card')) oCard += amt;
+        }
+      }
+
+      const bill = o.bills?.[0] || {};
+      const netAmount = Number(bill.netAmount ?? o.totalOrderNet ?? 0);
+      const refunded = Number(bill.totalRefunded || o.totalOrderRefunded || 0);
+      const effective = Math.max(0, netAmount - refunded);
+      const paid = Number(bill.paidAmount ?? o.totalOrderPaid ?? effective);
+
+      if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
+        const method = (bill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
+        if (method === 'cash') oCash = paid;
+        else if (method === 'upi') oUpi = paid;
+        else if (method === 'card' || method.includes('card')) oCard = paid;
+        else if (effective > 0) oCash = paid;
+      }
+
+      if (refunded > 0 && effective >= 0) {
+        const recorded = oCash + oUpi + oCard;
+        if (recorded > effective && recorded > 0) {
+          const ratio = effective / recorded;
+          oCash *= ratio;
+          oUpi *= ratio;
+          oCard *= ratio;
+        }
+      }
+
+      totalCash += oCash;
+      totalUPI += oUpi;
+      totalCard += oCard;
+    }
 
     return res.status(200).json(
       successResponse({
         message: 'Orders fetched successfully',
-        data: { orders },
+        data: { 
+          orders,
+          stats: {
+            totalCash: Math.round(totalCash * 100) / 100,
+            totalUPI: Math.round(totalUPI * 100) / 100,
+            totalCard: Math.round(totalCard * 100) / 100,
+          },
+        },
         pagination: {
           total,
           page: pageNum,
@@ -649,6 +728,7 @@ export const updateOrderStatus = async (req, res, next) => {
 
     if (targetCustomerId) {
       try {
+        await syncCustomerMetricsInDb(targetCustomerId).catch(() => {});
         await createCustomerNotificationHelper({
           customerId: targetCustomerId,
           title: title || 'Order Status Update',
@@ -657,7 +737,7 @@ export const updateOrderStatus = async (req, res, next) => {
           actionUrl: `/orders/${order._id}`,
         });
       } catch (err) {
-        console.error('Error creating customer notification in store status update:', err);
+        console.error('Error in store status update customer sync/notification:', err);
       }
     }
 
@@ -686,6 +766,14 @@ export const deleteStoreOrder = async (req, res, next) => {
 
     if (!order) {
       return next(notFound('Order not found'));
+    }
+
+    // Sync metrics for customer
+    const custId = order.customer?.customerId || order.customerId;
+    if (custId) {
+      await syncCustomerMetricsInDb(custId).catch(() => {});
+    } else if (order.customer?.phone) {
+      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
     }
 
     return res.status(200).json(
@@ -953,6 +1041,14 @@ export const processBillReturn = async (req, res, next) => {
     order.markModified('bills');
     order.markModified('returns');
     await order.save();
+
+    // Synchronize customer metrics
+    const custId = order.customer?.customerId || order.customerId;
+    if (custId) {
+      await syncCustomerMetricsInDb(custId).catch(() => {});
+    } else if (order.customer?.phone) {
+      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+    }
 
     return res.status(201).json(
       successResponse({

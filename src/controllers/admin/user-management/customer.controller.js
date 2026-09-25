@@ -2,6 +2,10 @@ import Customer from '../../../models/customer.model.js';
 import { successResponse } from '../../../utils/api-response.js';
 import { notFound, conflict } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
+import {
+  calculateCustomerMetrics,
+  batchPopulateCustomerMetrics,
+} from '../../../utils/customerMetrics.util.js';
 
 /**
  * Create a new Customer
@@ -74,6 +78,8 @@ export const getCustomers = async (req, res, next) => {
       .skip(pagination.skip)
       .limit(pagination.limit);
 
+    await batchPopulateCustomerMetrics(customers);
+
     return res.status(200).json(
       successResponse({
         message: 'Customers fetched successfully',
@@ -98,37 +104,21 @@ export const getCustomerById = async (req, res, next) => {
       return next(notFound('Customer not found'));
     }
 
-    // Calculated metrics & summary analytics matching Screen 2 design
-    const totalOrders = customer.totalOrders || 8;
-    const totalBillAmount = customer.totalPurchase || 18400;
-    const totalDueAmount = customer.amountDue || 4000;
+    const metrics = await calculateCustomerMetrics(customer);
 
-    const summary = {
-      avgStoreVisitsPerMonth: customer.totalStoreVisits ? Math.round(customer.totalStoreVisits / 12) || 6 : 6,
-      totalStoreVisits: customer.totalStoreVisits || 6,
-      avgMonthlyBillValue: totalOrders ? Math.round(totalBillAmount / Math.max(totalOrders, 1)) || 2000 : 2000,
-    };
-
-    // Spent chart dataset (Monthly breakdown)
-    const spentChart = [
-      { month: 'Jan', amount: 2000 },
-      { month: 'Feb', amount: 3000 },
-      { month: 'Mar', amount: 1500 },
-      { month: 'Apr', amount: 2800 },
-      { month: 'May', amount: 4500 },
-      { month: 'Jun', amount: 3200 },
-      { month: 'Jul', amount: 3100 },
-      { month: 'Aug', amount: 3300 },
-    ];
-
-    // Top 5 purchased products
-    const topPurchasedProducts = [
-      { item: 'Product 1', quantity: '150 pc' },
-      { item: 'Product 2', quantity: '50 kg' },
-      { item: 'Product 3', quantity: '150 pc' },
-      { item: 'Product 4', quantity: '150 pc' },
-      { item: 'Product 5', quantity: '150 pc' },
-    ];
+    if (
+      customer.totalPurchase !== metrics.totalBillAmount ||
+      customer.amountDue !== metrics.totalDueAmount ||
+      customer.totalOrders !== metrics.totalOrders
+    ) {
+      customer.totalPurchase = metrics.totalBillAmount;
+      customer.amountDue = metrics.totalDueAmount;
+      customer.totalOrders = metrics.totalOrders;
+      if (!customer.totalStoreVisits || customer.totalStoreVisits < metrics.summary.totalStoreVisits) {
+        customer.totalStoreVisits = metrics.summary.totalStoreVisits;
+      }
+      await customer.save().catch(() => {});
+    }
 
     return res.status(200).json(
       successResponse({
@@ -136,13 +126,15 @@ export const getCustomerById = async (req, res, next) => {
         data: {
           customer,
           purchaseInformation: {
-            totalOrders,
-            totalBillAmount,
-            totalDueAmount,
+            totalOrders: metrics.totalOrders,
+            totalBillAmount: metrics.totalBillAmount,
+            totalDueAmount: metrics.totalDueAmount,
           },
-          summary,
-          spentChart,
-          topPurchasedProducts,
+          summary: metrics.summary,
+          spentChart: metrics.spentChart,
+          topPurchasedProducts: metrics.topPurchasedProducts,
+          bills: metrics.bills,
+          orders: metrics.orders,
         },
       })
     );
