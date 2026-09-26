@@ -113,6 +113,11 @@ const adminProductSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    expiryAlert: {
+      type: Number,
+      default: 30,
+      min: [0, 'Expiry alert days cannot be negative'],
+    },
     hsnCode: {
       type: String,
       trim: true,

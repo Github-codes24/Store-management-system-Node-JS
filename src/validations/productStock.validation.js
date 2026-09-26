@@ -21,6 +21,7 @@ export const getProductStocksQuerySchema = {
         'offlineSellingPrice',
         'onlineSellingPrice',
         'expiryDate',
+        'expiryAlert',
         'expiring',
         'low_stock',
         'expiring_low_stock',
@@ -53,6 +54,9 @@ export const updateProductStockSchema = {
       expiringDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
       expDate: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
       expiry_date: z.union([z.string(), z.date()]).optional().nullable().or(z.literal('')),
+      expiryAlert: z.union([z.string(), z.number()]).optional().nullable().or(z.literal('')),
+      expiryAlertDays: z.union([z.string(), z.number()]).optional().nullable().or(z.literal('')),
+      expiry_alert: z.union([z.string(), z.number()]).optional().nullable().or(z.literal('')),
       hsnCode: z.string().trim().optional().nullable().or(z.literal('')),
       status: z.enum(['active', 'inactive']).optional(),
     })

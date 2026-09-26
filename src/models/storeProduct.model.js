@@ -32,6 +32,11 @@ const batchItemSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    expiryAlert: {
+      type: Number,
+      default: 30,
+      min: [0, 'Expiry alert days cannot be negative'],
+    },
   },
   {
     timestamps: true,
@@ -168,6 +173,11 @@ const storeProductSchema = new mongoose.Schema(
     expiryDate: {
       type: Date,
       default: null,
+    },
+    expiryAlert: {
+      type: Number,
+      default: 30,
+      min: [0, 'Expiry alert days cannot be negative'],
     },
     hsnCode: {
       type: String,

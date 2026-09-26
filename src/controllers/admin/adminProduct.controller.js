@@ -5,6 +5,7 @@ import { generateBarcode } from '../../utils/barcode.util.js';
 import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
+import { parseExpiryAlertDays } from '../../utils/expiryAlert.util.js';
 import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 
 export const createAdminProduct = async (req, res) => {
@@ -20,9 +21,14 @@ export const createAdminProduct = async (req, res) => {
     req.body.expiringDate ??
     req.body.expDate ??
     req.body.expiry_date;
+  const rawAlert =
+    req.body.expiryAlert ??
+    req.body.expiryAlertDays ??
+    req.body.expiry_alert;
 
   const parsedManufactureDate = parseFlexibleDate(rawMfg);
   const parsedExpiryDate = parseFlexibleDate(rawExp);
+  const parsedExpiryAlert = parseExpiryAlertDays(rawAlert);
 
   let finalBarcode = barcode !== undefined && barcode !== null ? String(barcode).trim() : '';
   if (finalBarcode !== '') {
@@ -58,6 +64,7 @@ export const createAdminProduct = async (req, res) => {
     ...productData,
     manufactureDate: parsedManufactureDate,
     expiryDate: parsedExpiryDate,
+    expiryAlert: parsedExpiryAlert,
     productName: productData.productName ? String(productData.productName).trim() : '',
     barcode: finalBarcode,
     productImage: imageUrl,
@@ -230,12 +237,22 @@ export const updateAdminProduct = async (req, res) => {
     updateData.expiringDate ??
     updateData.expDate ??
     updateData.expiry_date;
+  const rawAlert =
+    updateData.expiryAlert ??
+    updateData.expiryAlertDays ??
+    updateData.expiry_alert ??
+    req.body.expiryAlert ??
+    req.body.expiryAlertDays ??
+    req.body.expiry_alert;
 
   if (rawMfg !== undefined) {
     updateData.manufactureDate = parseFlexibleDate(rawMfg);
   }
   if (rawExp !== undefined) {
     updateData.expiryDate = parseFlexibleDate(rawExp);
+  }
+  if (rawAlert !== undefined) {
+    updateData.expiryAlert = parseExpiryAlertDays(rawAlert);
   }
 
   const rawImage = productImage !== undefined ? productImage : image;

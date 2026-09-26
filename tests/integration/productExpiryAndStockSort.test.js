@@ -472,4 +472,177 @@ describe('Product Inventory: Manufacture Date, Expiry Date & Priority Sorting', 
       expect(res.body.data[2].stockStatusCode).toBe('active');
     });
   });
+
+  describe('4. Flexible Expiry Alert Field, Dynamic Priority Sorting & Dashboard Detection', () => {
+    it('should parse flexible expiry alert formats (days, months, numbers) in Admin and Store forms', async () => {
+      // 1. Admin product with "20 days"
+      const adminRes1 = await request(app)
+        .post('/api/admin/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          productName: 'Alert 20 Days Item',
+          barcode: 'BC_ALERT_20',
+          productType: testProductType._id,
+          category: testCategory._id,
+          subcategory: testSubcategory._id,
+          brand: testBrand._id,
+          unit: testUnit._id,
+          mrp: 100,
+          purchasePrice: 60,
+          offlineSellingPrice: 90,
+          onlineSellingPrice: 95,
+          expiryDate: '2026-11-01',
+          expiryAlert: '20 days',
+        });
+      expect(adminRes1.status).toBe(201);
+      expect(adminRes1.body.data.expiryAlert).toBe(20);
+
+      // 2. Admin product with "2 months"
+      const adminRes2 = await request(app)
+        .post('/api/admin/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          productName: 'Alert 2 Months Item',
+          barcode: 'BC_ALERT_60',
+          productType: testProductType._id,
+          category: testCategory._id,
+          subcategory: testSubcategory._id,
+          brand: testBrand._id,
+          unit: testUnit._id,
+          mrp: 120,
+          purchasePrice: 70,
+          offlineSellingPrice: 110,
+          onlineSellingPrice: 115,
+          expiryDate: '2026-12-01',
+          expiryAlert: '2 months',
+        });
+      expect(adminRes2.status).toBe(201);
+      expect(adminRes2.body.data.expiryAlert).toBe(60);
+
+      // 3. Store product with "10 days"
+      const storeRes = await request(app)
+        .post('/api/store-employee/products')
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .field('productName', 'Store Alert 10 Days Item')
+        .field('barcode', 'BC_STORE_ALERT_10')
+        .field('productType', testProductType._id.toString())
+        .field('category', testCategory._id.toString())
+        .field('subcategory', testSubcategory._id.toString())
+        .field('brand', testBrand._id.toString())
+        .field('unit', testUnit._id.toString())
+        .field('mrp', 80)
+        .field('offlineSellingPrice', 75)
+        .field('onlineSellingPrice', 78)
+        .field('stockQuantity', 30)
+        .field('expiryDate', '2026-10-15')
+        .field('expiryAlert', '10 days');
+      expect(storeRes.status).toBe(201);
+      expect(storeRes.body.data.product.expiryAlert).toBe(10);
+    });
+
+    it('should prioritize products based on expiryDate and each product specific expiryAlert threshold', async () => {
+      const now = new Date();
+      // Product expiring in 45 days:
+      const in45Days = new Date(now.getTime() + 45 * 24 * 60 * 60 * 1000);
+
+      // Product A: expires in 45 days, with expiryAlert = 60 days (2 months) -> ALERT TRIGGERED (Priority 1)
+      await StoreProduct.create({
+        barcode: 'BC_EXP_TRIGGERED',
+        productName: 'Alert Triggered Product (2 Months Alert)',
+        productType: testProductType._id,
+        category: testCategory._id,
+        subcategory: testSubcategory._id,
+        brand: testBrand._id,
+        unit: testUnit._id,
+        mrp: 100,
+        offlineSellingPrice: 90,
+        onlineSellingPrice: 95,
+        stockQuantity: 50,
+        alertQuantity: 5,
+        storeId: testStore._id,
+        expiryDate: in45Days,
+        expiryAlert: 60,
+      });
+
+      // Product B: expires in 45 days, with expiryAlert = 10 days -> ALERT NOT TRIGGERED (Priority 4)
+      await StoreProduct.create({
+        barcode: 'BC_EXP_UNTRIGGERED',
+        productName: 'Untriggered Product (10 Days Alert)',
+        productType: testProductType._id,
+        category: testCategory._id,
+        subcategory: testSubcategory._id,
+        brand: testBrand._id,
+        unit: testUnit._id,
+        mrp: 100,
+        offlineSellingPrice: 90,
+        onlineSellingPrice: 95,
+        stockQuantity: 50,
+        alertQuantity: 5,
+        storeId: testStore._id,
+        expiryDate: in45Days,
+        expiryAlert: 10,
+      });
+
+      const res = await request(app)
+        .get('/api/store-employee/products')
+        .set('Authorization', `Bearer ${employeeToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBe(2);
+
+      // Product A with 60 days alert must appear first (Priority 1: Near Expiry)
+      expect(res.body.data[0].productName).toBe('Alert Triggered Product (2 Months Alert)');
+      expect(res.body.data[0].stockStatusCode).toBe('near_expiry');
+
+      // Product B with 10 days alert must appear after
+      expect(res.body.data[1].productName).toBe('Untriggered Product (10 Days Alert)');
+      expect(res.body.data[1].stockStatusCode).toBe('active');
+    });
+
+    it('should include products in Dashboard Overview and See All when within custom expiryAlert window', async () => {
+      const now = new Date();
+      const in20Days = new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000);
+
+      // Store Product with 25 days alert expiring in 20 days -> should be displayed on Dashboard!
+      await StoreProduct.create({
+        barcode: 'BC_STORE_DASH_20',
+        productName: 'Dashboard 25 Days Alert Item',
+        productType: testProductType._id,
+        category: testCategory._id,
+        subcategory: testSubcategory._id,
+        brand: testBrand._id,
+        unit: testUnit._id,
+        mrp: 150,
+        offlineSellingPrice: 140,
+        onlineSellingPrice: 145,
+        stockQuantity: 20,
+        storeId: testStore._id,
+        expiryDate: in20Days,
+        expiryAlert: 25,
+      });
+
+      // Store Employee Dashboard Overview
+      const empDash = await request(app)
+        .get('/api/store-employee/dashboard')
+        .set('Authorization', `Bearer ${employeeToken}`);
+
+      expect(empDash.status).toBe(200);
+      const expiringInDash = empDash.body.data.expiringProducts;
+      const found = expiringInDash.find((p) => p.productName === 'Dashboard 25 Days Alert Item');
+      expect(found).toBeDefined();
+      expect(found.expiryAlert).toBe(25);
+
+      // See All Expiring Products
+      const seeAllRes = await request(app)
+        .get('/api/store-employee/dashboard/expiring-products')
+        .set('Authorization', `Bearer ${employeeToken}`);
+
+      expect(seeAllRes.status).toBe(200);
+      const seeAllFound = seeAllRes.body.data.products.find(
+        (p) => p.productName === 'Dashboard 25 Days Alert Item'
+      );
+      expect(seeAllFound).toBeDefined();
+      expect(seeAllFound.expiryAlert).toBe(25);
+    });
+  });
 });

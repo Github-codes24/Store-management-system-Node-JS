@@ -12,6 +12,7 @@ import { generateBarcode, generateBarcodeSvg, generateBarcodePdfBuffer } from '.
 import { getPagination } from '../../utils/pagination.js';
 import { processUploadedFile } from '../../utils/file-upload.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
+import { parseExpiryAlertDays } from '../../utils/expiryAlert.util.js';
 import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 import ExcelJS from 'exceljs';
 
@@ -29,8 +30,9 @@ export const computeStockStatus = (product) => {
   }
 
   const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  if (product.expiryDate && new Date(product.expiryDate) <= thirtyDaysLater) {
+  const alertDays = Number(product.expiryAlert) > 0 ? Number(product.expiryAlert) : 30;
+  const alertCutoff = new Date(now.getTime() + alertDays * 24 * 60 * 60 * 1000);
+  if (product.expiryDate && new Date(product.expiryDate) <= alertCutoff) {
     return { statusText: 'Near Expiry', statusCode: 'near_expiry' };
   }
 
@@ -110,7 +112,35 @@ const buildStoreProductFilter = (queryParams, storeId = null) => {
         break;
       case 'near_expiry':
       case 'near expiry':
-        filter.expiryDate = { $ne: null, $lte: thirtyDaysLater };
+        filter.expiryDate = { $ne: null };
+        filter.$expr = {
+          $lte: [
+            '$expiryDate',
+            {
+              $add: [
+                now,
+                {
+                  $multiply: [
+                    {
+                      $cond: [
+                        {
+                          $and: [
+                            { $ne: ['$expiryAlert', null] },
+                            { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                            { $gt: ['$expiryAlert', 0] },
+                          ],
+                        },
+                        '$expiryAlert',
+                        30,
+                      ],
+                    },
+                    86400000,
+                  ],
+                },
+              ],
+            },
+          ],
+        };
         break;
       default:
         break;
@@ -200,6 +230,7 @@ export const getStoreProducts = async (req, res, next) => {
         alertQuantity: product.alertQuantity,
         manufactureDate: product.manufactureDate,
         expiryDate: product.expiryDate,
+        expiryAlert: product.expiryAlert ?? 30,
         attributes: product.attributes || [],
         status: product.status,
         stockStatus: statusText,
@@ -318,9 +349,14 @@ export const createStoreProduct = async (req, res, next) => {
       req.body.expiringDate ??
       req.body.expDate ??
       req.body.expiry_date;
+    const rawExpiryAlert =
+      req.body.expiryAlert ??
+      req.body.expiryAlertDays ??
+      req.body.expiry_alert;
 
     const parsedExpiryDate = parseFlexibleDate(rawExp);
     const parsedManufactureDate = parseFlexibleDate(rawMfg);
+    const parsedExpiryAlert = parseExpiryAlertDays(rawExpiryAlert);
 
     // Process image
     const imageUrl = await processUploadedFile(req.file, productImage, req);
@@ -366,6 +402,7 @@ export const createStoreProduct = async (req, res, next) => {
         if (purchasePrice !== undefined && !isNaN(Number(purchasePrice))) existingProduct.purchasePrice = Number(purchasePrice);
         if (manufactureDate !== undefined) existingProduct.manufactureDate = parsedManufactureDate;
         if (expiryDate !== undefined) existingProduct.expiryDate = parsedExpiryDate;
+        if (rawExpiryAlert !== undefined) existingProduct.expiryAlert = parsedExpiryAlert;
         if (hsnCode) existingProduct.hsnCode = String(hsnCode).trim();
         if (imageUrl) existingProduct.productImage = imageUrl;
         if (Array.isArray(parsedAttributes) && parsedAttributes.length > 0) {
@@ -393,6 +430,7 @@ export const createStoreProduct = async (req, res, next) => {
             if (onlineSellingPrice !== undefined && !isNaN(Number(onlineSellingPrice))) existingProduct.batches[batchIndex].onlineSellingPrice = Number(onlineSellingPrice);
             if (manufactureDate !== undefined) existingProduct.batches[batchIndex].manufactureDate = parsedManufactureDate;
             if (expiryDate !== undefined) existingProduct.batches[batchIndex].expiryDate = parsedExpiryDate;
+            if (rawExpiryAlert !== undefined) existingProduct.batches[batchIndex].expiryAlert = parsedExpiryAlert;
           } else if (batchIndex >= 0 && isNewBatch) {
             // If same batch number exists and user marked new batch, add quantity
             existingProduct.batches[batchIndex].stockQuantity =
@@ -407,6 +445,7 @@ export const createStoreProduct = async (req, res, next) => {
               onlineSellingPrice: !isNaN(Number(onlineSellingPrice)) ? Number(onlineSellingPrice) : 0,
               manufactureDate: parsedManufactureDate,
               expiryDate: parsedExpiryDate,
+              expiryAlert: parsedExpiryAlert,
             });
           }
           existingProduct.batch = resolvedBatchCode;
@@ -471,6 +510,7 @@ export const createStoreProduct = async (req, res, next) => {
         onlineSellingPrice: !isNaN(Number(onlineSellingPrice)) ? Number(onlineSellingPrice) : 0,
         manufactureDate: parsedManufactureDate,
         expiryDate: parsedExpiryDate,
+        expiryAlert: parsedExpiryAlert,
       },
     ];
 
@@ -496,6 +536,7 @@ export const createStoreProduct = async (req, res, next) => {
       purchasePrice: !isNaN(Number(purchasePrice)) ? Number(purchasePrice) : 0,
       manufactureDate: parsedManufactureDate,
       expiryDate: parsedExpiryDate,
+      expiryAlert: parsedExpiryAlert,
       hsnCode: hsnCode !== undefined && hsnCode !== null ? String(hsnCode).trim() : null,
       attributes: Array.isArray(parsedAttributes) ? parsedAttributes : [],
       status: status || 'active',
@@ -606,12 +647,22 @@ export const updateStoreProduct = async (req, res, next) => {
       updateData.manufacturingDate ??
       updateData.mfgDate ??
       updateData.manufacture_date;
+    const rawAlert =
+      updateData.expiryAlert ??
+      updateData.expiryAlertDays ??
+      updateData.expiry_alert ??
+      req.body.expiryAlert ??
+      req.body.expiryAlertDays ??
+      req.body.expiry_alert;
 
     if (rawExp !== undefined) {
       updateData.expiryDate = parseFlexibleDate(rawExp);
     }
     if (rawMfg !== undefined) {
       updateData.manufactureDate = parseFlexibleDate(rawMfg);
+    }
+    if (rawAlert !== undefined) {
+      updateData.expiryAlert = parseExpiryAlertDays(rawAlert);
     }
 
     if (existingProduct.batches && existingProduct.batches.length > 0) {
@@ -631,6 +682,15 @@ export const updateStoreProduct = async (req, res, next) => {
         }
         if (updateData.onlineSellingPrice !== undefined && !isNaN(Number(updateData.onlineSellingPrice))) {
           batchToUpdate.onlineSellingPrice = Number(updateData.onlineSellingPrice);
+        }
+        if (updateData.manufactureDate !== undefined) {
+          batchToUpdate.manufactureDate = updateData.manufactureDate;
+        }
+        if (updateData.expiryDate !== undefined) {
+          batchToUpdate.expiryDate = updateData.expiryDate;
+        }
+        if (updateData.expiryAlert !== undefined) {
+          batchToUpdate.expiryAlert = updateData.expiryAlert;
         }
         updateData.batches = existingProduct.batches;
       }

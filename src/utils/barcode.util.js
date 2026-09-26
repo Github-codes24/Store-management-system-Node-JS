@@ -106,13 +106,13 @@ export const generateBarcodeSvg = (barcodeStr) => {
     } else {
       if (inBar) {
         const barW = (i - startIdx) * unitW;
-        barsHtml += `<rect x="${(startIdx * unitW).toFixed(2)}" y="5" width="${barW.toFixed(2)}" height="${height - 18}" fill="#000000" />`;
+        barsHtml += `<rect x="${(startIdx * unitW).toFixed(2)}" y="5" width="${barW.toFixed(2)}" height="${height - 18}" fill="#000000" shape-rendering="crispEdges" />`;
         inBar = false;
       }
     }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges">
     <rect width="100%" height="100%" fill="#ffffff"/>
     ${barsHtml}
     <text x="${width / 2}" y="${height - 2}" font-family="Arial, sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5" text-anchor="middle" fill="#000000">${code}</text>
@@ -165,7 +165,7 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
     const sellNum = Number(product.offlineSellingPrice || product.onlineSellingPrice || 0);
     let priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')}`;
     if (sellNum > 0 && sellNum !== mrpNum) {
-      priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')} | Price: Rs. ${sellNum.toLocaleString('en-IN')}`;
+      priceText = `MRP: Rs. ${mrpNum.toLocaleString('en-IN')} | Sale: Rs. ${sellNum.toLocaleString('en-IN')}`;
     }
     const prodTitle = String(product.productName || 'Product').substring(0, 32);
 
@@ -281,10 +281,10 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
             // Brand Name
             doc
               .font('Helvetica-Bold')
-              .fontSize(5.5)
-              .fillColor('#222222')
-              .text(brandName.toUpperCase(), stickerX + 3, 2, {
-                width: labelW - 6,
+              .fontSize(6.5)
+              .fillColor('#000000')
+              .text(brandName.toUpperCase(), stickerX + 2, 2.5, {
+                width: labelW - 4,
                 align: 'center',
                 ellipsis: true,
                 lineBreak: false,
@@ -293,10 +293,10 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
             // Product Name
             doc
               .font('Helvetica-Bold')
-              .fontSize(6.5)
+              .fontSize(8)
               .fillColor('#000000')
-              .text(prodTitle, stickerX + 3, 8.5, {
-                width: labelW - 6,
+              .text(prodTitle, stickerX + 2, 10, {
+                width: labelW - 4,
                 align: 'center',
                 ellipsis: true,
                 lineBreak: false,
@@ -305,19 +305,63 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
             // Price (MRP / Sale)
             doc
               .font('Helvetica-Bold')
-              .fontSize(6)
+              .fontSize(7.5)
               .fillColor('#000000')
-              .text(priceText, stickerX + 3, 16.5, {
-                width: labelW - 6,
+              .text(priceText, stickerX + 2, 19.5, {
+                width: labelW - 4,
                 align: 'center',
                 lineBreak: false,
               });
 
             // Barcode Bars
-            const availableBarcodeWidth = labelW - 16;
+            const availableBarcodeWidth = labelW - 12;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
-            const barStartY = 24.5;
+            const barStartX = stickerX + 6;
+            const barStartY = 29;
+            const barHeight = 26;
+
+            renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
+
+            // Barcode Numeric String
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(8)
+              .fillColor('#000000')
+              .text(barcodeStr, stickerX + 2, 57, {
+                width: labelW - 4,
+                align: 'center',
+                characterSpacing: 1.5,
+                lineBreak: false,
+              });
+          } else {
+            // Product Name (top)
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(8.5)
+              .fillColor('#000000')
+              .text(prodTitle, stickerX + 2, 4, {
+                width: labelW - 4,
+                align: 'center',
+                ellipsis: true,
+                lineBreak: false,
+              });
+
+            // Price (MRP / Sale)
+            doc
+              .font('Helvetica-Bold')
+              .fontSize(8)
+              .fillColor('#000000')
+              .text(priceText, stickerX + 2, 15, {
+                width: labelW - 4,
+                align: 'center',
+                lineBreak: false,
+              });
+
+            // Barcode Bars
+            const availableBarcodeWidth = labelW - 12;
+            const unitBarWidth = availableBarcodeWidth / bitSequence.length;
+            const barStartX = stickerX + 6;
+            const barStartY = 26;
             const barHeight = 28;
 
             renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
@@ -325,56 +369,12 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
             // Barcode Numeric String
             doc
               .font('Helvetica-Bold')
-              .fontSize(6.8)
+              .fontSize(8.5)
               .fillColor('#000000')
-              .text(barcodeStr, stickerX + 3, 54.5, {
-                width: labelW - 6,
+              .text(barcodeStr, stickerX + 2, 56.5, {
+                width: labelW - 4,
                 align: 'center',
-                characterSpacing: 1.1,
-                lineBreak: false,
-              });
-          } else {
-            // Product Name (top)
-            doc
-              .font('Helvetica-Bold')
-              .fontSize(7)
-              .fillColor('#000000')
-              .text(prodTitle, stickerX + 3, 3.5, {
-                width: labelW - 6,
-                align: 'center',
-                ellipsis: true,
-                lineBreak: false,
-              });
-
-            // Price (MRP / Sale)
-            doc
-              .font('Helvetica-Bold')
-              .fontSize(6.5)
-              .fillColor('#000000')
-              .text(priceText, stickerX + 3, 12, {
-                width: labelW - 6,
-                align: 'center',
-                lineBreak: false,
-              });
-
-            // Barcode Bars
-            const availableBarcodeWidth = labelW - 16;
-            const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
-            const barStartY = 22;
-            const barHeight = 31;
-
-            renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
-
-            // Barcode Numeric String
-            doc
-              .font('Helvetica-Bold')
-              .fontSize(7)
-              .fillColor('#000000')
-              .text(barcodeStr, stickerX + 3, 55, {
-                width: labelW - 6,
-                align: 'center',
-                characterSpacing: 1.1,
+                characterSpacing: 1.5,
                 lineBreak: false,
               });
           }

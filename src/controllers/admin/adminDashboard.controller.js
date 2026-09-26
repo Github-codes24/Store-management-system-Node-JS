@@ -433,18 +433,47 @@ const fetchActivitiesData = async (limit = 10) => {
 };
 
 /**
- * Fetch products expiring within one month (30 days) for Dashboard display
+ * Fetch products expiring within their expiry alert window for Dashboard display
  */
 const fetchExpiringProductsData = async (limit = 10, days = 30) => {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const maxExpiryDate = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
+
+  const alertDaysExpr = {
+    $lte: [
+      '$expiryDate',
+      {
+        $add: [
+          now,
+          {
+            $multiply: [
+              {
+                $cond: [
+                  {
+                    $and: [
+                      { $ne: ['$expiryAlert', null] },
+                      { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                      { $gt: ['$expiryAlert', 0] },
+                    ],
+                  },
+                  '$expiryAlert',
+                  Number(days) || 30,
+                ],
+              },
+              86400000,
+            ],
+          },
+        ],
+      },
+    ],
+  };
 
   const [adminExpiring, storeExpiring] = await Promise.all([
     AdminProduct.find({
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $gte: startOfToday, $lte: maxExpiryDate },
+      expiryDate: { $ne: null, $gte: startOfToday },
+      $expr: alertDaysExpr,
     })
       .populate('category', 'name')
       .populate('brand', 'name')
@@ -454,7 +483,8 @@ const fetchExpiringProductsData = async (limit = 10, days = 30) => {
     StoreProduct.find({
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $gte: startOfToday, $lte: maxExpiryDate },
+      expiryDate: { $ne: null, $gte: startOfToday },
+      $expr: alertDaysExpr,
     })
       .populate('category', 'name categoryName')
       .populate('brand', 'name')
@@ -482,6 +512,7 @@ const fetchExpiringProductsData = async (limit = 10, days = 30) => {
       category: p.category?.name || '—',
       expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
       daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+      expiryAlert: p.expiryAlert ?? 30,
       stock: p.stockQuantity,
       unit: p.unit?.shortName || p.unit?.name || 'pc',
       source: 'Admin Master',
@@ -505,6 +536,7 @@ const fetchExpiringProductsData = async (limit = 10, days = 30) => {
       category: p.category?.name || p.category?.categoryName || '—',
       expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
       daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+      expiryAlert: p.expiryAlert ?? 30,
       stock: p.stockQuantity,
       unit: p.unit?.shortName || p.unit?.name || 'pc',
       storeName: p.storeId?.name || null,

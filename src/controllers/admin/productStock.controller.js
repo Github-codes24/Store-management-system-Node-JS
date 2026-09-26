@@ -4,6 +4,7 @@ import { successResponse } from '../../utils/api-response.js';
 import { getPagination } from '../../utils/pagination.js';
 import { generateBarcodeSvg, generateBarcodePdfBuffer } from '../../utils/barcode.util.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
+import { parseExpiryAlertDays } from '../../utils/expiryAlert.util.js';
 import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 import ExcelJS from 'exceljs';
 
@@ -23,8 +24,9 @@ export const computeStockStatus = (product) => {
   }
 
   const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  if (product.expiryDate && new Date(product.expiryDate) <= thirtyDaysLater) {
+  const alertDays = Number(product.expiryAlert) > 0 ? Number(product.expiryAlert) : 30;
+  const alertCutoff = new Date(now.getTime() + alertDays * 24 * 60 * 60 * 1000);
+  if (product.expiryDate && new Date(product.expiryDate) <= alertCutoff) {
     return { statusText: 'Near Expiry', statusCode: 'near_expiry' };
   }
 
@@ -85,7 +87,35 @@ const buildProductStockFilter = (queryParams) => {
         ];
         break;
       case 'near_expiry':
-        filter.expiryDate = { $ne: null, $lte: thirtyDaysLater };
+        filter.expiryDate = { $ne: null };
+        filter.$expr = {
+          $lte: [
+            '$expiryDate',
+            {
+              $add: [
+                now,
+                {
+                  $multiply: [
+                    {
+                      $cond: [
+                        {
+                          $and: [
+                            { $ne: ['$expiryAlert', null] },
+                            { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                            { $gt: ['$expiryAlert', 0] },
+                          ],
+                        },
+                        '$expiryAlert',
+                        30,
+                      ],
+                    },
+                    86400000,
+                  ],
+                },
+              ],
+            },
+          ],
+        };
         break;
       default:
         break;
@@ -168,6 +198,7 @@ export const getProductStocks = async (req, res, next) => {
         reorderPoint: product.reorderPoint,
         manufactureDate: product.manufactureDate,
         expiryDate: product.expiryDate,
+        expiryAlert: product.expiryAlert ?? 30,
         hsnCode: product.hsnCode,
         status: product.status,
         stockStatus: statusText,
@@ -313,6 +344,7 @@ export const getProductStockById = async (req, res, next) => {
         reorderingPoint: product.reorderPoint,
         manufactureDate: product.manufactureDate,
         expiryDate: product.expiryDate,
+        expiryAlert: product.expiryAlert ?? 30,
         hsnCode: product.hsnCode || '',
         status: product.status,
         stockStatus: statusText,
@@ -356,12 +388,22 @@ export const updateProductStock = async (req, res, next) => {
       updateData.expiringDate ??
       updateData.expDate ??
       updateData.expiry_date;
+    const rawAlert =
+      updateData.expiryAlert ??
+      updateData.expiryAlertDays ??
+      updateData.expiry_alert ??
+      req.body.expiryAlert ??
+      req.body.expiryAlertDays ??
+      req.body.expiry_alert;
 
     if (rawMfg !== undefined) {
       updateData.manufactureDate = parseFlexibleDate(rawMfg);
     }
     if (rawExp !== undefined) {
       updateData.expiryDate = parseFlexibleDate(rawExp);
+    }
+    if (rawAlert !== undefined) {
+      updateData.expiryAlert = parseExpiryAlertDays(rawAlert);
     }
 
     const updatedProduct = await AdminProduct.findByIdAndUpdate(

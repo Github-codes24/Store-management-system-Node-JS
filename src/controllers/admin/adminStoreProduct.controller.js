@@ -9,6 +9,7 @@ import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
+import { parseExpiryAlertDays } from '../../utils/expiryAlert.util.js';
 import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
 
 /**
@@ -21,8 +22,9 @@ const computeDisplayStatus = (item) => {
   if (item.expiryDate) {
     const exp = new Date(item.expiryDate);
     const now = new Date();
-    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-    if (exp <= now || exp.getTime() - now.getTime() <= thirtyDays) {
+    const alertDays = Number(item.expiryAlert) > 0 ? Number(item.expiryAlert) : 30;
+    const alertWindow = alertDays * 24 * 60 * 60 * 1000;
+    if (exp <= now || exp.getTime() - now.getTime() <= alertWindow) {
       return 'Near Expiry';
     }
   }
@@ -202,6 +204,7 @@ export const getAdminStoreProducts = async (req, res, next) => {
         batches: p.batches || [],
         manufactureDate: p.manufactureDate ? p.manufactureDate.toISOString().split('T')[0] : null,
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : null,
+        expiryAlert: p.expiryAlert ?? 30,
         imageUrl: p.productImage || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500&h=500&fit=crop',
         store: p.storeId ? { id: p.storeId._id, name: p.storeId.name, storeCode: p.storeId.storeCode } : null,
       };
@@ -268,6 +271,7 @@ export const getAdminStoreProductById = async (req, res, next) => {
       sgstPercentage: product.sgstPercentage,
       manufactureDate: product.manufactureDate ? product.manufactureDate.toISOString().split('T')[0] : null,
       expiryDate: product.expiryDate ? product.expiryDate.toISOString().split('T')[0] : null,
+      expiryAlert: product.expiryAlert ?? 30,
       hsnCode: product.hsnCode,
       attributes: product.attributes || [],
       imageUrl: product.productImage || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500&h=500&fit=crop',
@@ -349,8 +353,16 @@ export const updateAdminStoreProduct = async (req, res, next) => {
       updateData.expiringDate ??
       updateData.expDate ??
       updateData.expiry_date;
+    const rawAlert =
+      updateData.expiryAlert ??
+      updateData.expiryAlertDays ??
+      updateData.expiry_alert ??
+      req.body.expiryAlert ??
+      req.body.expiryAlertDays ??
+      req.body.expiry_alert;
     if (rawMfg !== undefined) product.manufactureDate = parseFlexibleDate(rawMfg);
     if (rawExp !== undefined) product.expiryDate = parseFlexibleDate(rawExp);
+    if (rawAlert !== undefined) product.expiryAlert = parseExpiryAlertDays(rawAlert);
     if (updateData.productImage !== undefined) product.productImage = updateData.productImage;
 
     await product.save();

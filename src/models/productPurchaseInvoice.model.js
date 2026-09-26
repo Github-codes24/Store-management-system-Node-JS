@@ -60,6 +60,11 @@ const purchaseItemSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    expiryAlert: {
+      type: Number,
+      default: 30,
+      min: 0,
+    },
   },
   { _id: true }
 );

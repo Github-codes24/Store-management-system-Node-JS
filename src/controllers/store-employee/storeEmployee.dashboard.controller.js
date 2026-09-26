@@ -258,17 +258,44 @@ export const getDashboardOverview = async (req, res, next) => {
       stock: p.stockQuantity,
     }));
 
-    // Expiring Products (Top 5 expiring within 30 days / 1 month or already expired)
+    // Expiring Products (Top 5 expiring within individual expiryAlert window or already expired)
     const now = new Date();
-    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const expiringRaw = await StoreProduct.find({
       ...getStoreFilter('storeId'),
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $lte: thirtyDaysFromNow },
+      expiryDate: { $ne: null },
+      $expr: {
+        $lte: [
+          '$expiryDate',
+          {
+            $add: [
+              now,
+              {
+                $multiply: [
+                  {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ['$expiryAlert', null] },
+                          { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                          { $gt: ['$expiryAlert', 0] },
+                        ],
+                      },
+                      '$expiryAlert',
+                      30,
+                    ],
+                  },
+                  86400000,
+                ],
+              },
+            ],
+          },
+        ],
+      },
     })
-      .select('productName expiryDate stockQuantity')
+      .select('productName expiryDate stockQuantity expiryAlert')
       .sort({ expiryDate: 1 })
       .limit(5);
 
@@ -281,6 +308,7 @@ export const getDashboardOverview = async (req, res, next) => {
         productName: p.productName,
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
         daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+        expiryAlert: p.expiryAlert ?? 30,
         stock: p.stockQuantity,
       };
     });
@@ -779,13 +807,46 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
     const { search, days = 30, page = 1, limit = 10 } = req.query;
 
     const now = new Date();
-    const maxExpiryDate = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
 
     const filter = {
       isDeleted: false,
       status: 'active',
-      expiryDate: { $ne: null, $lte: maxExpiryDate },
+      expiryDate: { $ne: null },
     };
+
+    if (req.query.days !== undefined && req.query.days !== 'alert' && !isNaN(Number(req.query.days))) {
+      const maxExpiryDate = new Date(now.getTime() + Number(req.query.days) * 24 * 60 * 60 * 1000);
+      filter.expiryDate = { $ne: null, $lte: maxExpiryDate };
+    } else {
+      filter.$expr = {
+        $lte: [
+          '$expiryDate',
+          {
+            $add: [
+              now,
+              {
+                $multiply: [
+                  {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ['$expiryAlert', null] },
+                          { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                          { $gt: ['$expiryAlert', 0] },
+                        ],
+                      },
+                      '$expiryAlert',
+                      30,
+                    ],
+                  },
+                  86400000,
+                ],
+              },
+            ],
+          },
+        ],
+      };
+    }
 
     if (employeeStoreId) {
       filter.$or = [
@@ -805,7 +866,7 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
 
     const expiringRaw = await StoreProduct.find(filter)
-      .select('productName expiryDate stockQuantity batch batches')
+      .select('productName expiryDate stockQuantity expiryAlert batch batches')
       .sort({ expiryDate: 1 })
       .skip(pagination.skip)
       .limit(pagination.limit);
@@ -820,6 +881,7 @@ export const getSeeAllExpiringProducts = async (req, res, next) => {
         batch: p.batch || p.batches?.[0]?.batchNumber || 'B1',
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : '',
         daysLeft: daysLeft > 0 ? `${daysLeft} Days` : daysLeft === 0 ? 'Today' : 'Expired',
+        expiryAlert: p.expiryAlert ?? 30,
         stock: p.stockQuantity,
       };
     });

@@ -1,9 +1,9 @@
 /**
  * Utility to build an aggregation pipeline for prioritizing products by:
- * 1. Expiring soon (expiry date within 30 days / 1 month) - earliest expiry date first
+ * 1. Expiring soon (expiry date within each product's specific expiryAlert window, default 30 days) - earliest expiry date first
  * 2. Low stock (stockQuantity <= minStockAlert or alertQuantity or reorderPoint) - lowest stock first
  * 3. Out of stock (stockQuantity === 0)
- * 4. Future expiring products (expiry date > 30 days) - earliest expiry date
+ * 4. Future expiring products (expiry date > expiryAlert threshold) - earliest expiry date
  * 5. Normal products - lowest stock first, then newest
  */
 export const buildExpiringAndLowStockPipeline = ({
@@ -29,7 +29,6 @@ export const buildExpiringAndLowStockPipeline = ({
   }
 
   const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   return [
     { $match: filter },
@@ -47,16 +46,43 @@ export const buildExpiringAndLowStockPipeline = ({
             new Date('9999-12-31T23:59:59.999Z'),
           ],
         },
+        alertCutoffDate: {
+          $add: [
+            now,
+            {
+              $multiply: [
+                {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ne: ['$expiryAlert', null] },
+                        { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                        { $gt: ['$expiryAlert', 0] },
+                      ],
+                    },
+                    '$expiryAlert',
+                    30,
+                  ],
+                },
+                86400000,
+              ],
+            },
+          ],
+        },
+      },
+    },
+    {
+      $addFields: {
         sortPriority: {
           $switch: {
             branches: [
-              // Priority 1: Expiring soon (within 30 days)
+              // Priority 1: Expiring soon (within product's individual expiryAlert window)
               {
                 case: {
                   $and: [
                     { $ne: ['$expiryDate', null] },
                     { $ne: [{ $type: '$expiryDate' }, 'missing'] },
-                    { $lte: ['$expiryDate', thirtyDaysLater] },
+                    { $lte: ['$expiryDate', '$alertCutoffDate'] },
                   ],
                 },
                 then: 1,
@@ -97,7 +123,7 @@ export const buildExpiringAndLowStockPipeline = ({
                 case: { $lte: ['$stockQuantity', 0] },
                 then: 3,
               },
-              // Priority 4: Future expiry (> 30 days)
+              // Priority 4: Future expiry (beyond product's expiryAlert window)
               {
                 case: {
                   $and: [
@@ -117,6 +143,7 @@ export const buildExpiringAndLowStockPipeline = ({
       $sort: {
         sortPriority: 1,
         effectiveExpiry: 1,
+        expiryAlert: 1,
         stockQuantity: 1,
         createdAt: -1,
       },
