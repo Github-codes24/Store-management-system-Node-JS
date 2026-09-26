@@ -88,10 +88,9 @@ export const isValidBarcode = (barcode) => {
 export const generateBarcodeSvg = (barcodeStr) => {
   const code = (barcodeStr || '1234567890123').toString().trim();
   const bitSequence = getCode128BitString(code);
-  const width = 200;
+  const totalWidth = bitSequence.length;
   const height = 50;
 
-  const unitW = width / bitSequence.length;
   let barsHtml = '';
   let inBar = false;
   let startIdx = 0;
@@ -105,17 +104,17 @@ export const generateBarcodeSvg = (barcodeStr) => {
       }
     } else {
       if (inBar) {
-        const barW = (i - startIdx) * unitW;
-        barsHtml += `<rect x="${(startIdx * unitW).toFixed(2)}" y="5" width="${barW.toFixed(2)}" height="${height - 18}" fill="#000000" shape-rendering="crispEdges" />`;
+        const barW = i - startIdx;
+        barsHtml += `<rect x="${startIdx}" y="5" width="${barW}" height="${height - 18}" fill="#000000" shape-rendering="crispEdges" />`;
         inBar = false;
       }
     }
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${height}" viewBox="0 0 ${totalWidth} ${height}" shape-rendering="crispEdges">
     <rect width="100%" height="100%" fill="#ffffff"/>
     ${barsHtml}
-    <text x="${width / 2}" y="${height - 2}" font-family="Arial, sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5" text-anchor="middle" fill="#000000">${code}</text>
+    <text x="${totalWidth / 2}" y="${height - 2}" font-family="Arial, sans-serif" font-size="10" font-weight="bold" letter-spacing="1.5" text-anchor="middle" fill="#000000">${code}</text>
   </svg>`;
 };
 
@@ -313,8 +312,8 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
-            const availableBarcodeWidth = 38 * MM_TO_PT;
+            // Barcode Bars (42mm width centered on 50mm sticker with 4mm safe margins)
+            const availableBarcodeWidth = 42 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
             const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 28;
