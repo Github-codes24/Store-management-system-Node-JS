@@ -248,8 +248,8 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
       const MM_TO_PT = 72 / 25.4;
       const labelW = 50 * MM_TO_PT;   // 141.732 pt
       const labelH = 25 * MM_TO_PT;   // 70.866 pt
-      const colGap = 5 * MM_TO_PT;    // 14.173 pt
-      const pageW = 105 * MM_TO_PT;   // 297.638 pt
+      const colGap = 2 * MM_TO_PT;    // 2mm physical gap between columns
+      const pageW = 102 * MM_TO_PT;   // 102mm total page width
       const pageH = 25 * MM_TO_PT;    // 70.866 pt
 
       const doc = new PDFDocument({
@@ -313,12 +313,12 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars (42mm width centered on 50mm sticker with 4mm safe margins)
-            const availableBarcodeWidth = 42 * MM_TO_PT;
+            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
+            const availableBarcodeWidth = 38 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
             const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 28;
-            const barHeight = 27;
+            const barHeight = 25;
 
             renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
 
@@ -357,12 +357,12 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars (42mm width centered on 50mm sticker with 4mm safe margins)
-            const availableBarcodeWidth = 42 * MM_TO_PT;
+            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
+            const availableBarcodeWidth = 38 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
             const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 26;
-            const barHeight = 28;
+            const barHeight = 26;
 
             renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
 
