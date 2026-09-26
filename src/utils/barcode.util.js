@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import JsBarcode from 'jsbarcode';
 
 /**
  * Code 128 Character Patterns (Indices 0 to 102)
@@ -18,14 +19,24 @@ const CODE128_PATTERNS = [
 ];
 
 /**
- * Returns a 0/1 binary bit sequence for Code 128-B encoding
+ * Returns an optimized 0/1 binary bit sequence for Code 128 encoding (Auto Set A/B/C)
  * @param {string} text 
  * @returns {string} Bit string of 1s (bars) and 0s (spaces)
  */
 export const getCode128BitString = (text) => {
   const safeText = String(text || '1234567890123').trim();
-  const startCodeB = 104;
+  try {
+    const CODE128 = JsBarcode.getModule('CODE128');
+    const enc = new CODE128(safeText, {});
+    if (enc.valid()) {
+      const res = enc.encode();
+      if (res && res.data) return res.data;
+    }
+  } catch {
+    // fallback
+  }
 
+  const startCodeB = 104;
   const values = [startCodeB];
   let checkSum = startCodeB;
   for (let i = 0; i < safeText.length; i++) {
@@ -313,12 +324,12 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
-            const availableBarcodeWidth = 38 * MM_TO_PT;
+            // Barcode Bars (41mm width centered on 50mm sticker with 4.5mm safe margins)
+            const availableBarcodeWidth = 41 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
             const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
-            const barStartY = 29;
-            const barHeight = 26;
+            const barStartY = 28;
+            const barHeight = 27;
 
             renderBarcodeBars(doc, bitSequence, barStartX, barStartY, unitBarWidth, barHeight);
 
@@ -357,8 +368,8 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
-            const availableBarcodeWidth = 38 * MM_TO_PT;
+            // Barcode Bars (41mm width centered on 50mm sticker with 4.5mm safe margins)
+            const availableBarcodeWidth = 41 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
             const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 26;

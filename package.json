@@ -38,6 +38,7 @@
     "express-rate-limit": "^8.5.2",
     "globals": "^17.5.0",
     "helmet": "^8.1.0",
+    "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.19.2",
     "morgan": "^1.10.1",
