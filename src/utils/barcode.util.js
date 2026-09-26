@@ -313,10 +313,10 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars
-            const availableBarcodeWidth = labelW - 12;
+            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
+            const availableBarcodeWidth = 38 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-            const barStartX = stickerX + 6;
+            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 29;
             const barHeight = 26;
 
@@ -357,10 +357,10 @@ export const generateBarcodePdfBuffer = async (product, quantity = 1, options = 
                 lineBreak: false,
               });
 
-            // Barcode Bars
-            const availableBarcodeWidth = labelW - 12;
+            // Barcode Bars (38mm width centered on 50mm sticker with 6mm safe margins)
+            const availableBarcodeWidth = 38 * MM_TO_PT;
             const unitBarWidth = availableBarcodeWidth / bitSequence.length;
-            const barStartX = stickerX + 6;
+            const barStartX = stickerX + (labelW - availableBarcodeWidth) / 2;
             const barStartY = 26;
             const barHeight = 28;
 
