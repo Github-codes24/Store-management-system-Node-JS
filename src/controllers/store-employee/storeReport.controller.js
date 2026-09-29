@@ -1,7 +1,19 @@
 import StoreOrder from '../../models/storeOrder.model.js';
 import StoreProduct from '../../models/storeProduct.model.js';
+import ProductType from '../../models/productType.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest } from '../../utils/api-error.js';
+
+// Utility helper to format percentage growth
+const formatGrowth = (current, previous) => {
+  if (!previous || previous === 0) {
+    if (!current || current === 0) return '+0.0%';
+    return '+100.0%';
+  }
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+};
 
 /**
  * 1. Sales Register Report
@@ -646,6 +658,180 @@ export const saveCompositeGSTReport = async (req, res, next) => {
           endDate: endDate || null,
           notes: notes || '',
           savedAt: new Date(),
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 5. Store P&L Report (Store Employee Panel)
+ * GET /api/store-employee/reports/pnl
+ */
+export const getStorePnLReport = async (req, res, next) => {
+  try {
+    const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || req.storeEmployee?.store || null;
+    const { startDate, endDate, productTypeId } = req.query;
+
+    let currentStart = startDate ? new Date(startDate) : new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+    let currentEnd = endDate ? new Date(endDate) : new Date();
+
+    currentStart.setHours(0, 0, 0, 0);
+    currentEnd.setHours(23, 59, 59, 999);
+
+    const durationMs = currentEnd.getTime() - currentStart.getTime();
+    const prevEnd = new Date(currentStart.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - durationMs);
+
+    const storeQueryFilter = { isDeleted: false };
+    if (storeId) {
+      storeQueryFilter.$or = [{ storeId }, { storeId: null }];
+    }
+
+    const [storeProducts, productTypes] = await Promise.all([
+      StoreProduct.find(storeQueryFilter).lean(),
+      ProductType.find().lean(),
+    ]);
+
+    const priceMap = {};
+    const productTypeMap = {};
+    for (const p of storeProducts) {
+      const idStr = String(p._id);
+      priceMap[idStr] = Number(p.purchasePrice || 0);
+      productTypeMap[idStr] = p.productType ? String(p.productType._id || p.productType) : null;
+    }
+
+    const calculateStoreMetrics = async (start, end) => {
+      const query = { createdAt: { $gte: start, $lte: end } };
+      if (storeId) {
+        query.store = storeId;
+      }
+
+      const orders = await StoreOrder.find(query).lean();
+
+      const typeMetricsMap = {};
+      for (const pt of productTypes) {
+        typeMetricsMap[String(pt._id)] = {
+          productTypeId: String(pt._id),
+          productType: pt.name,
+          revenue: 0,
+          cost: 0,
+        };
+      }
+
+      let totalRevenue = 0;
+      let totalCost = 0;
+
+      for (const order of orders) {
+        for (const bill of (order.bills || [])) {
+          totalRevenue += Number(bill.netAmount || 0);
+          for (const item of (bill.items || [])) {
+            const qty = Number(item.quantity || 1) - Number(item.returnedQuantity || 0);
+            if (qty <= 0) continue;
+
+            const pId = String(item.product);
+            const costPerUnit = item.purchasePrice !== undefined && !isNaN(Number(item.purchasePrice)) && Number(item.purchasePrice) > 0
+              ? Number(item.purchasePrice)
+              : (priceMap[pId] !== undefined ? priceMap[pId] : Number(item.sellingPrice * 0.67));
+
+            const itemCost = qty * costPerUnit;
+            const itemRevenue = Number(item.totalAmount || (item.sellingPrice * qty));
+            totalCost += itemCost;
+
+            const ptId = productTypeMap[pId] || null;
+            if (ptId && typeMetricsMap[ptId]) {
+              typeMetricsMap[ptId].revenue += itemRevenue;
+              typeMetricsMap[ptId].cost += itemCost;
+            } else if (productTypes.length > 0) {
+              const defaultPtId = String(productTypes[0]._id);
+              if (typeMetricsMap[defaultPtId]) {
+                typeMetricsMap[defaultPtId].revenue += itemRevenue;
+                typeMetricsMap[defaultPtId].cost += itemCost;
+              }
+            }
+          }
+        }
+      }
+
+      const netProfit = totalRevenue - totalCost;
+      const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+      return {
+        totalRevenue,
+        totalCost,
+        netProfit,
+        profitMargin,
+        typeMetricsMap,
+      };
+    };
+
+    const currentMetrics = await calculateStoreMetrics(currentStart, currentEnd);
+    const prevMetrics = await calculateStoreMetrics(prevStart, prevEnd);
+
+    const summaryCards = {
+      totalRevenue: {
+        value: parseFloat(currentMetrics.totalRevenue.toFixed(0)),
+        formattedValue: `₹${currentMetrics.totalRevenue.toLocaleString('en-IN')}`,
+        growth: formatGrowth(currentMetrics.totalRevenue, prevMetrics.totalRevenue),
+      },
+      productCost: {
+        value: parseFloat(currentMetrics.totalCost.toFixed(0)),
+        formattedValue: `₹${currentMetrics.totalCost.toLocaleString('en-IN')}`,
+        growth: formatGrowth(currentMetrics.totalCost, prevMetrics.totalCost),
+      },
+      netProfit: {
+        value: parseFloat(currentMetrics.netProfit.toFixed(0)),
+        formattedValue: `₹${currentMetrics.netProfit.toLocaleString('en-IN')}`,
+        growth: formatGrowth(currentMetrics.netProfit, prevMetrics.netProfit),
+      },
+      profitMargin: {
+        value: parseFloat(currentMetrics.profitMargin.toFixed(2)),
+        formattedValue: `${currentMetrics.profitMargin.toFixed(2)}%`,
+        growth: formatGrowth(currentMetrics.profitMargin, prevMetrics.profitMargin),
+      },
+    };
+
+    let breakdownList = Object.values(currentMetrics.typeMetricsMap).map((pt, index) => {
+      const rev = pt.revenue;
+      const cost = pt.cost;
+      const profit = rev - cost;
+      const margin = rev > 0 ? (profit / rev) * 100 : 0;
+
+      return {
+        srNo: index + 1,
+        productTypeId: pt.productTypeId,
+        productType: pt.productType,
+        revenue: parseFloat(rev.toFixed(0)),
+        cost: parseFloat(cost.toFixed(0)),
+        netProfit: parseFloat(profit.toFixed(0)),
+        pnlMargin: parseFloat(margin.toFixed(2)),
+        pnlMarginFormatted: `${margin.toFixed(2)}%`,
+      };
+    });
+
+    if (productTypeId && productTypeId !== 'all' && productTypeId !== 'All') {
+      breakdownList = breakdownList.filter(b => String(b.productTypeId) === String(productTypeId));
+    }
+
+    const totalSummary = {
+      productType: 'Total',
+      revenue: breakdownList.reduce((sum, b) => sum + b.revenue, 0),
+      cost: breakdownList.reduce((sum, b) => sum + b.cost, 0),
+      netProfit: breakdownList.reduce((sum, b) => sum + b.netProfit, 0),
+      pnlMargin: currentMetrics.totalRevenue > 0
+        ? parseFloat(((currentMetrics.netProfit / currentMetrics.totalRevenue) * 100).toFixed(2))
+        : 0,
+    };
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Store P&L report retrieved successfully',
+        data: {
+          summaryCards,
+          productTypeBreakdown: breakdownList,
+          totalSummary,
         },
       })
     );

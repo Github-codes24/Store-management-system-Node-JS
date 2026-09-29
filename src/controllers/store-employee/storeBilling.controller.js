@@ -253,6 +253,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         batch: itemBatch,
         mrp: parseFloat(item.mrp || storeProd.mrp || 0),
         sellingPrice: unitPrice,
+        purchasePrice: parseFloat(item.purchasePrice !== undefined ? item.purchasePrice : (storeProd.purchasePrice || 0)),
         quantity: qty,
         unit: item.unit || storeProd.unit || 'pc',
         gstPercentage: parseFloat(item.gstPercentage || 0),
@@ -486,6 +487,71 @@ export const createOrAppendOrderBill = async (req, res, next) => {
 };
 
 /**
+ * Helper to calculate Cash, UPI, Card payment statistics from orders list
+ */
+const calculateOrderPaymentStats = (statsOrders) => {
+  let totalCash = 0;
+  let totalUPI = 0;
+  let totalCard = 0;
+
+  for (const o of statsOrders) {
+    let oCash = 0;
+    let oUpi = 0;
+    let oCard = 0;
+    const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
+      ? o.payments
+      : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
+      ? o.bills[0].payments
+      : [];
+
+    if (paymentsList.length > 0) {
+      for (const p of paymentsList) {
+        const mode = (p.mode || '').trim().toLowerCase();
+        const amt = Number(p.amount) || 0;
+        if (mode === 'cash') oCash += amt;
+        else if (mode === 'upi') oUpi += amt;
+        else if (mode === 'card' || mode.includes('card')) oCard += amt;
+      }
+    }
+
+    const bill = o.bills?.[0] || {};
+    const netAmount = Number(bill.netAmount ?? o.totalOrderNet ?? 0);
+    const refunded = Number(bill.totalRefunded || o.totalOrderRefunded || 0);
+    const effective = Math.max(0, netAmount - refunded);
+    const paid = Number(bill.paidAmount ?? o.totalOrderPaid ?? effective);
+
+    if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
+      const method = (bill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
+      if (method === 'cash') oCash = paid;
+      else if (method === 'upi') oUpi = paid;
+      else if (method === 'card' || method.includes('card')) oCard = paid;
+      else if (effective > 0) oCash = paid;
+    }
+
+    if (refunded > 0 && effective >= 0) {
+      const recorded = oCash + oUpi + oCard;
+      if (recorded > effective && recorded > 0) {
+        const ratio = effective / recorded;
+        oCash *= ratio;
+        oUpi *= ratio;
+        oCard *= ratio;
+      }
+    }
+
+    totalCash += oCash;
+    totalUPI += oUpi;
+    totalCard += oCard;
+  }
+
+  return {
+    totalCash: Math.round(totalCash * 100) / 100,
+    totalUPI: Math.round(totalUPI * 100) / 100,
+    totalCard: Math.round(totalCard * 100) / 100,
+    totalAmount: Math.round((totalCash + totalUPI + totalCard) * 100) / 100,
+  };
+};
+
+/**
  * List Store Orders with filtering and pagination
  * GET /api/store-employee/billing/orders
  */
@@ -498,6 +564,8 @@ export const getStoreOrders = async (req, res, next) => {
       saleType = '', 
       startDate = '', 
       endDate = '', 
+      isToday = '',
+      dateFilter = '',
       page = 1, 
       limit = 20 
     } = req.query;
@@ -524,7 +592,19 @@ export const getStoreOrders = async (req, res, next) => {
       query['bills.saleType'] = new RegExp(`^${saleType.trim()}$`, 'i');
     }
 
-    if (startDate || endDate) {
+    // Check if user requested "Today" shortcut filter
+    const isTodayRequested = String(isToday).toLowerCase() === 'true' || String(dateFilter).toLowerCase() === 'today';
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    if (isTodayRequested) {
+      query.createdAt = {
+        $gte: todayStart,
+        $lte: todayEnd,
+      };
+    } else if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) {
         const start = new Date(startDate);
@@ -549,66 +629,32 @@ export const getStoreOrders = async (req, res, next) => {
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
     const skip = (pageNum - 1) * limitNum;
 
-    const [orders, total, statsOrders] = await Promise.all([
+    // Build dedicated today's query for todayStats calculation
+    const todayQuery = {
+      ...query,
+      createdAt: { $gte: todayStart, $lte: todayEnd },
+    };
+
+    const [orders, total, statsOrders, todayOrders] = await Promise.all([
       StoreOrder.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
       StoreOrder.countDocuments(query),
       StoreOrder.find(query)
         .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
         .lean(),
+      StoreOrder.find(todayQuery)
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .lean(),
     ]);
 
-    let totalCash = 0;
-    let totalUPI = 0;
-    let totalCard = 0;
+    const stats = calculateOrderPaymentStats(statsOrders);
+    const todayStatsRaw = calculateOrderPaymentStats(todayOrders);
 
-    for (const o of statsOrders) {
-      let oCash = 0;
-      let oUpi = 0;
-      let oCard = 0;
-      const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
-        ? o.payments
-        : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
-        ? o.bills[0].payments
-        : [];
-
-      if (paymentsList.length > 0) {
-        for (const p of paymentsList) {
-          const mode = (p.mode || '').trim().toLowerCase();
-          const amt = Number(p.amount) || 0;
-          if (mode === 'cash') oCash += amt;
-          else if (mode === 'upi') oUpi += amt;
-          else if (mode === 'card' || mode.includes('card')) oCard += amt;
-        }
-      }
-
-      const bill = o.bills?.[0] || {};
-      const netAmount = Number(bill.netAmount ?? o.totalOrderNet ?? 0);
-      const refunded = Number(bill.totalRefunded || o.totalOrderRefunded || 0);
-      const effective = Math.max(0, netAmount - refunded);
-      const paid = Number(bill.paidAmount ?? o.totalOrderPaid ?? effective);
-
-      if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
-        const method = (bill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
-        if (method === 'cash') oCash = paid;
-        else if (method === 'upi') oUpi = paid;
-        else if (method === 'card' || method.includes('card')) oCard = paid;
-        else if (effective > 0) oCash = paid;
-      }
-
-      if (refunded > 0 && effective >= 0) {
-        const recorded = oCash + oUpi + oCard;
-        if (recorded > effective && recorded > 0) {
-          const ratio = effective / recorded;
-          oCash *= ratio;
-          oUpi *= ratio;
-          oCard *= ratio;
-        }
-      }
-
-      totalCash += oCash;
-      totalUPI += oUpi;
-      totalCard += oCard;
-    }
+    const todayStats = {
+      todayCash: todayStatsRaw.totalCash,
+      todayUPI: todayStatsRaw.totalUPI,
+      todayCard: todayStatsRaw.totalCard,
+      todayTotal: todayStatsRaw.totalAmount,
+    };
 
     return res.status(200).json(
       successResponse({
@@ -616,10 +662,13 @@ export const getStoreOrders = async (req, res, next) => {
         data: { 
           orders,
           stats: {
-            totalCash: Math.round(totalCash * 100) / 100,
-            totalUPI: Math.round(totalUPI * 100) / 100,
-            totalCard: Math.round(totalCard * 100) / 100,
+            ...stats,
+            todayCash: todayStats.todayCash,
+            todayUPI: todayStats.todayUPI,
+            todayCard: todayStats.todayCard,
+            todayTotal: todayStats.todayTotal,
           },
+          todayStats,
         },
         pagination: {
           total,
@@ -995,6 +1044,7 @@ export const processBillReturn = async (req, res, next) => {
         barcode: billItem.barcode || '',
         batch: returnBatch,
         sellingPrice: unitPrice,
+        purchasePrice: parseFloat(billItem.purchasePrice || (storeProd ? storeProd.purchasePrice : 0) || 0),
         quantity: returnQty,
         unit: billItem.unit || 'pc',
         refundAmount: refundAmt,

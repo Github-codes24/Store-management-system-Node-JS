@@ -4,6 +4,7 @@ import {
   getGSTSummaryReport,
   getSalesSummaryReport,
   saveCompositeGSTReport,
+  getStorePnLReport,
 } from '../../controllers/store-employee/storeReport.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
 
@@ -23,5 +24,9 @@ router.get('/sales-summary', getSalesSummaryReport);
 
 // 4. Save Composite GST Report
 router.post('/composite-gst', saveCompositeGSTReport);
+
+// 5. Store P&L Report
+router.get('/pnl', getStorePnLReport);
+router.get('/store-pnl', getStorePnLReport);
 
 export default router;

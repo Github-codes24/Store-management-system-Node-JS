@@ -32,6 +32,11 @@ const billItemSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    purchasePrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     quantity: {
       type: Number,
       required: [true, 'Quantity is required'],
@@ -84,6 +89,11 @@ const returnItemSchema = new mongoose.Schema(
     sellingPrice: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    purchasePrice: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     quantity: {
