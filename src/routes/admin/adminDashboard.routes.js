@@ -5,6 +5,7 @@ import {
   getDashboardActivities,
   getDashboardCharts,
   getDashboardExpiringProducts,
+  getDashboardStoresExpiry,
 } from '../../controllers/admin/adminDashboard.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
 
@@ -19,6 +20,8 @@ router.get('/stats', getDashboardStats);
 router.get('/activities', getDashboardActivities);
 router.get('/charts', getDashboardCharts);
 router.get('/expiring-products', getDashboardExpiringProducts);
+router.get('/stores-expiry', getDashboardStoresExpiry);
 router.get('/', getDashboardOverview);
 
 export default router;
+

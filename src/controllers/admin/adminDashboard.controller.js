@@ -548,16 +548,102 @@ const fetchExpiringProductsData = async (limit = 10, days = 30) => {
 };
 
 /**
+ * Fetch list of stores along with each store's expiring products count
+ */
+const fetchStoresWithExpiringProductsData = async () => {
+  const stores = await Store.find({ isDeleted: false })
+    .select('name storeCode location status')
+    .sort({ name: 1 })
+    .lean();
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const alertDaysExpr = {
+    $lte: [
+      '$expiryDate',
+      {
+        $add: [
+          now,
+          {
+            $multiply: [
+              {
+                $cond: [
+                  {
+                    $and: [
+                      { $ne: ['$expiryAlert', null] },
+                      { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                      { $gt: ['$expiryAlert', 0] },
+                    ],
+                  },
+                  '$expiryAlert',
+                  30,
+                ],
+              },
+              86400000,
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const storeExpiryAgg = await StoreProduct.aggregate([
+    {
+      $match: {
+        isDeleted: false,
+        status: 'active',
+        expiryDate: { $ne: null, $gte: startOfToday },
+        $expr: alertDaysExpr,
+      },
+    },
+    {
+      $group: {
+        _id: '$storeId',
+        expiringCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const countMap = {};
+  storeExpiryAgg.forEach((item) => {
+    if (item._id) {
+      countMap[String(item._id)] = item.expiringCount;
+    }
+  });
+
+  const storesWithExpiryCounts = stores.map((s) => {
+    const sId = String(s._id);
+    const expiringCount = countMap[sId] || 0;
+    return {
+      _id: s._id,
+      id: s._id,
+      storeName: s.name,
+      name: s.name,
+      storeCode: s.storeCode || '—',
+      location: s.location || '—',
+      status: s.status || 'active',
+      expiringProductsCount: expiringCount,
+      expiringCount,
+      nearExpiryCount: expiringCount,
+    };
+  });
+
+  return storesWithExpiryCounts;
+};
+
+/**
  * Combined Admin Dashboard Overview
  * GET /api/admin/dashboard/overview
  */
 export const getDashboardOverview = async (_req, res, next) => {
   try {
-    const [statsResult, charts, activities, expiringProducts] = await Promise.all([
+    const [statsResult, charts, activities, expiringProducts, storesWithExpiringProducts] = await Promise.all([
       fetchStatsData(),
       fetchChartsData(),
       fetchActivitiesData(10),
       fetchExpiringProductsData(10, 30),
+      fetchStoresWithExpiringProductsData(),
     ]);
 
     return res.status(200).json(
@@ -576,6 +662,8 @@ export const getDashboardOverview = async (_req, res, next) => {
           charts,
           activities,
           expiringProducts,
+          storesWithExpiringProducts,
+          storeExpiryList: storesWithExpiringProducts,
         },
       })
     );
@@ -676,10 +764,34 @@ export const getDashboardCharts = async (_req, res, next) => {
   }
 };
 
+/**
+ * Stores Expiry List Endpoint
+ * GET /api/admin/dashboard/stores-expiry
+ */
+export const getDashboardStoresExpiry = async (_req, res, next) => {
+  try {
+    const storesWithExpiringProducts = await fetchStoresWithExpiringProductsData();
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Stores list with expiring product counts retrieved successfully',
+        data: {
+          storesWithExpiringProducts,
+          total: storesWithExpiringProducts.length,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   getDashboardOverview,
   getDashboardStats,
   getDashboardActivities,
   getDashboardCharts,
   getDashboardExpiringProducts,
+  getDashboardStoresExpiry,
 };
+

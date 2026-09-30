@@ -200,8 +200,8 @@ export const getAdminStoreProducts = async (req, res, next) => {
         category: p.category?.name || p.category?.categoryName || '—',
         subcategory: p.subcategory?.name || p.subcategory?.subcategoryName || '—',
         barcode: p.barcode || '—',
-        batchNumber: p.batch || (p.batches && p.batches.length > 0 ? p.batches[0].batchNumber : 'B240701A'),
-        batches: p.batches || [],
+        batchNumber: p.batch || (p.batches && p.batches.length > 0 ? p.batches[0].batchNumber : '—'),
+        batches: Array.isArray(p.batches) ? p.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0) : [],
         manufactureDate: p.manufactureDate ? p.manufactureDate.toISOString().split('T')[0] : null,
         expiryDate: p.expiryDate ? p.expiryDate.toISOString().split('T')[0] : null,
         expiryAlert: p.expiryAlert ?? 30,
@@ -244,13 +244,17 @@ export const getAdminStoreProductById = async (req, res, next) => {
     const unitLabel = product.unit?.shortName || product.unit?.name || 'pc';
     const displayStatus = computeDisplayStatus(product);
 
+    const activeBatches = Array.isArray(product.batches)
+      ? product.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0)
+      : [];
+
     const formattedProduct = {
       _id: product._id,
       id: product._id,
       productName: product.productName,
       barcode: product.barcode || '717271883927',
-      batchNumber: product.batch || (product.batches && product.batches.length > 0 ? product.batches[0].batchNumber : 'B240701A'),
-      batches: product.batches || [],
+      batchNumber: product.batch || (activeBatches.length > 0 ? activeBatches[0].batchNumber : '—'),
+      batches: activeBatches,
       brand: product.brand?.name || '—',
       productType: product.productType?.name || '—',
       category: product.category?.name || product.category?.categoryName || '—',

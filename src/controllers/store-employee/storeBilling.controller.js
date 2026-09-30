@@ -235,6 +235,16 @@ export const createOrAppendOrderBill = async (req, res, next) => {
           );
         }
 
+        // Clean up / remove batches that have 0 stock
+        storeProd.batches = storeProd.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0);
+
+        // Update active batch name field to first remaining active batch
+        if (storeProd.batches.length > 0) {
+          storeProd.batch = storeProd.batches[0].batchNumber || '';
+        } else {
+          storeProd.batch = '';
+        }
+
         // Recalculate total product stock quantity
         storeProd.stockQuantity = storeProd.batches.reduce(
           (sum, b) => sum + (Number(b.stockQuantity) || 0),

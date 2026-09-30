@@ -215,8 +215,10 @@ export const getStoreProducts = async (req, res, next) => {
         category: product.category,
         subcategory: product.subcategory,
         batchType: product.batchType,
-        batch: product.batch,
-        batches: Array.isArray(product.batches) ? product.batches : [],
+        batch: product.batch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : ''),
+        batches: Array.isArray(product.batches)
+          ? product.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0)
+          : [],
         unit: product.unit,
         unitShortName,
         piece: product.piece,
@@ -260,7 +262,7 @@ export const getStoreProductById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const product = await StoreProduct.findOne({ _id: id, isDeleted: false })
+    const productDoc = await StoreProduct.findOne({ _id: id, isDeleted: false })
       .populate('productType', 'name')
       .populate('category', 'name')
       .populate('subcategory', 'name')
@@ -268,8 +270,13 @@ export const getStoreProductById = async (req, res, next) => {
       .populate('unit', 'name shortName')
       .populate('attributes.attributeId');
 
-    if (!product) {
+    if (!productDoc) {
       throw notFound('Store product record not found');
+    }
+
+    const product = productDoc.toObject();
+    if (Array.isArray(product.batches)) {
+      product.batches = product.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0);
     }
 
     const { statusText, statusCode } = computeStockStatus(product);
@@ -280,6 +287,8 @@ export const getStoreProductById = async (req, res, next) => {
         message: 'Store product details retrieved successfully',
         data: {
           product,
+          batches: product.batches || [],
+          activeBatchNumber: product.batch || (product.batches && product.batches.length > 0 ? product.batches[0].batchNumber : '—'),
           stockStatus: statusText,
           stockStatusCode: statusCode,
           unitShortName,
