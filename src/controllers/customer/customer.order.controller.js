@@ -174,11 +174,13 @@ export const placeOrder = async (req, res, next) => {
 
     await newOrder.save();
 
-    // Clear Customer Cart
-    const cart = await Cart.findOne({ customer: customerId });
-    if (cart) {
-      cart.items = [];
-      await cart.save();
+    // Clear Customer Cart ONLY for COD orders (for online payments, cart is cleared upon successful verification)
+    if (paymentMethod.toUpperCase() === 'COD') {
+      const cart = await Cart.findOne({ customer: customerId });
+      if (cart) {
+        cart.items = [];
+        await cart.save();
+      }
     }
 
     // Update Customer Statistics

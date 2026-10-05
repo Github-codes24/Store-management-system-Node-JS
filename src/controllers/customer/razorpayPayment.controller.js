@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import razorpayInstance from '../../config/razorpay.js';
 import env from '../../config/env.js';
 import StoreOrder from '../../models/storeOrder.model.js';
+import Cart from '../../models/cart.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, internal, notFound } from '../../utils/api-error.js';
 
@@ -140,6 +141,13 @@ export const verifyRazorpayPayment = async (req, res, next) => {
         }
         order.totalOrderPaid = order.totalOrderNet;
         await order.save();
+
+        // Clear Customer Cart upon successful online payment verification
+        const targetCustomerId = req.customer?._id || order.customer?.customerId;
+        if (targetCustomerId) {
+          await Cart.findOneAndUpdate({ customer: targetCustomerId }, { $set: { items: [] } });
+        }
+
         orderDetails = {
           orderId: order._id,
           orderNumber: order.orderId,
