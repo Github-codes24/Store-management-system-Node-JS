@@ -160,9 +160,14 @@ export const login = async (req, res, next) => {
     }
 
     // Retrieve assigned Role document
-    let roleDoc = await Role.findOne({ subAdmin: subAdmin._id, isDeleted: false }).lean();
-    if (!roleDoc && subAdmin.roleId) {
+    let roleDoc = null;
+    if (subAdmin.roleId) {
       roleDoc = await Role.findOne({ _id: subAdmin.roleId, isDeleted: false }).lean();
+    }
+    if (!roleDoc) {
+      roleDoc = await Role.findOne({ subAdmin: subAdmin._id, isDeleted: false })
+        .sort({ updatedAt: -1 })
+        .lean();
     }
 
     const token = jwt.sign(

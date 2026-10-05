@@ -309,6 +309,10 @@ export const createRole = async (req, res, next) => {
 
     if (subAdmin) {
       await SubAdmin.findByIdAndUpdate(subAdmin, { roleId: newRole._id });
+      await Role.updateMany(
+        { subAdmin: subAdmin, _id: { $ne: newRole._id } },
+        { $set: { subAdmin: null } }
+      );
     }
 
     const populatedRole = await Role.findById(newRole._id)
@@ -354,8 +358,13 @@ export const updateRole = async (req, res, next) => {
 
     await role.save();
 
-    if (subAdmin) {
-      await SubAdmin.findByIdAndUpdate(subAdmin, { roleId: role._id });
+    const targetSubAdminId = subAdmin !== undefined ? (subAdmin || null) : role.subAdmin;
+    if (targetSubAdminId) {
+      await SubAdmin.findByIdAndUpdate(targetSubAdminId, { roleId: role._id });
+      await Role.updateMany(
+        { subAdmin: targetSubAdminId, _id: { $ne: role._id } },
+        { $set: { subAdmin: null } }
+      );
     }
 
     const updatedRole = await Role.findById(role._id)

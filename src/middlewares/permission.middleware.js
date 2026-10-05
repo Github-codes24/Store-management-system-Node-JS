@@ -15,7 +15,20 @@ export const requirePermission = (moduleName, actionRequired) => {
     }
 
     const permissions = req.permissions || {};
-    const modulePerms = permissions[moduleName];
+    
+    // 1. Direct key lookup
+    let modulePerms = permissions[moduleName];
+
+    // 2. Case-insensitive / normalized fallback lookup
+    if (!modulePerms) {
+      const targetKeyLower = moduleName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const foundKey = Object.keys(permissions).find(
+        (k) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === targetKeyLower
+      );
+      if (foundKey) {
+        modulePerms = permissions[foundKey];
+      }
+    }
 
     if (!modulePerms) {
       return next(forbidden(`Access denied. You do not have permission to access '${moduleName}'.`));
@@ -34,3 +47,4 @@ export const requirePermission = (moduleName, actionRequired) => {
 };
 
 export default requirePermission;
+
