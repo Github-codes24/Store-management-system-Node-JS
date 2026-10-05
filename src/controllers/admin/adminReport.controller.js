@@ -45,9 +45,20 @@ const getProductMaps = async () => {
   const hsnMap = {};
   const productTypeMap = {};
 
+  const sanitizePrice = (rawPurchasePrice, rawMrp, rawSellingPrice) => {
+    let price = Number(rawPurchasePrice || 0);
+    const mrp = Number(rawMrp || 0);
+    const sellingPrice = Number(rawSellingPrice || 0);
+
+    if (price > 100000 || (mrp > 0 && price > mrp * 3) || (sellingPrice > 0 && price > sellingPrice * 3)) {
+      price = mrp > 0 ? mrp * 0.7 : (sellingPrice > 0 ? sellingPrice * 0.7 : 0);
+    }
+    return Math.max(0, price);
+  };
+
   for (const p of storeProducts) {
     const idStr = String(p._id);
-    priceMap[idStr] = Number(p.purchasePrice || 0);
+    priceMap[idStr] = sanitizePrice(p.purchasePrice, p.mrp, p.storeSellingPrice || p.onlineSellingPrice);
     categoryMap[idStr] = p.category?.name || p.category?.categoryName || 'General';
     unitMap[idStr] = p.unit?.name || p.unit?.unitName || 'pc';
     hsnMap[idStr] = p.hsnCode || p.barcode || '1001';
@@ -56,7 +67,7 @@ const getProductMaps = async () => {
 
   for (const p of adminProducts) {
     const idStr = String(p._id);
-    priceMap[idStr] = Number(p.purchasePrice || 0);
+    priceMap[idStr] = sanitizePrice(p.purchasePrice, p.mrp, p.onlineSellingPrice);
     categoryMap[idStr] = p.category?.name || p.category?.categoryName || 'General';
     unitMap[idStr] = p.unit?.name || p.unit?.unitName || 'pc';
     hsnMap[idStr] = p.hsnCode || p.barcode || '1001';

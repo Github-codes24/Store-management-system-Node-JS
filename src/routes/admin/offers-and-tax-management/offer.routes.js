@@ -10,6 +10,7 @@ import {
   exportOffers,
 } from '../../../controllers/admin/offers-and-tax-management/offer.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
 import {
@@ -22,20 +23,21 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/options', getOfferFormOptions);
-router.get('/export', exportOffers);
+router.get('/options', requirePermission('offersManagement', 'viewOnly'), getOfferFormOptions);
+router.get('/export', requirePermission('offersManagement', 'viewOnly'), exportOffers);
 
 router
   .route('/')
-  .post(parseForm, validate(createOfferSchema), createOffer)
-  .get(getOffers);
+  .post(requirePermission('offersManagement', 'create'), parseForm, validate(createOfferSchema), createOffer)
+  .get(requirePermission('offersManagement', 'viewOnly'), getOffers);
 
 router
   .route('/:id')
-  .get(getOfferById)
-  .put(parseForm, validate(updateOfferSchema), updateOffer)
-  .delete(deleteOffer);
+  .get(requirePermission('offersManagement', 'viewOnly'), getOfferById)
+  .put(requirePermission('offersManagement', 'modify'), parseForm, validate(updateOfferSchema), updateOffer)
+  .delete(requirePermission('offersManagement', 'delete'), deleteOffer);
 
-router.patch('/:id/status', parseForm, validate(toggleOfferStatusSchema), toggleOfferStatus);
+router.patch('/:id/status', requirePermission('offersManagement', 'modifyStatus'), parseForm, validate(toggleOfferStatusSchema), toggleOfferStatus);
 
 export default router;
+

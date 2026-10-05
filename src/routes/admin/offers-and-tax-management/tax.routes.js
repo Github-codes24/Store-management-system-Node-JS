@@ -8,6 +8,7 @@ import {
   getTaxFilterOptions,
 } from '../../../controllers/admin/offers-and-tax-management/tax.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
 import {
@@ -19,17 +20,18 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/filter-options', getTaxFilterOptions);
+router.get('/filter-options', requirePermission('taxManagement', 'viewOnly'), getTaxFilterOptions);
 
 router
   .route('/')
-  .post(parseForm, validate(createTaxSchema), createTax)
-  .get(getAllTaxes);
+  .post(requirePermission('taxManagement', 'create'), parseForm, validate(createTaxSchema), createTax)
+  .get(requirePermission('taxManagement', 'viewOnly'), getAllTaxes);
 
 router
   .route('/:id')
-  .get(getTaxById)
-  .put(parseForm, validate(updateTaxSchema), updateTax)
-  .delete(deleteTax);
+  .get(requirePermission('taxManagement', 'viewOnly'), getTaxById)
+  .put(requirePermission('taxManagement', 'modify'), parseForm, validate(updateTaxSchema), updateTax)
+  .delete(requirePermission('taxManagement', 'delete'), deleteTax);
 
 export default router;
+

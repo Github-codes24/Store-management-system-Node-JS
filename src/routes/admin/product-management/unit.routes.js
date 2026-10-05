@@ -9,6 +9,7 @@ import {
   deleteUnit,
 } from '../../../controllers/admin/product-management/unit.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
 import {
@@ -21,20 +22,21 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/dropdown', getUnitDropdown);
+router.get('/dropdown', requirePermission('units', 'viewOnly'), getUnitDropdown);
 
 router
   .route('/')
-  .post(parseForm, validate(createUnitSchema), createUnit)
-  .get(getUnits);
+  .post(requirePermission('units', 'create'), parseForm, validate(createUnitSchema), createUnit)
+  .get(requirePermission('units', 'viewOnly'), getUnits);
 
 router
   .route('/:id')
-  .get(getUnitById)
-  .put(parseForm, validate(updateUnitSchema), updateUnit)
-  .delete(deleteUnit);
+  .get(requirePermission('units', 'viewOnly'), getUnitById)
+  .put(requirePermission('units', 'modify'), parseForm, validate(updateUnitSchema), updateUnit)
+  .delete(requirePermission('units', 'delete'), deleteUnit);
 
-router.patch('/:id/status', validate(toggleStatusSchema), toggleUnitStatus);
+router.patch('/:id/status', requirePermission('units', 'modifyStatus'), validate(toggleStatusSchema), toggleUnitStatus);
 
 export default router;
+
 

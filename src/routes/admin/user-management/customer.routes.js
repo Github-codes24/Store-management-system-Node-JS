@@ -8,6 +8,7 @@ import {
   exportCustomers,
 } from '../../../controllers/admin/user-management/customer.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
 import {
@@ -19,17 +20,18 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/export', exportCustomers);
+router.get('/export', requirePermission('customers', 'viewOnly'), exportCustomers);
 
 router
   .route('/')
-  .post(parseForm, validate(createCustomerSchema), createCustomer)
-  .get(getCustomers);
+  .post(requirePermission('customers', 'create'), parseForm, validate(createCustomerSchema), createCustomer)
+  .get(requirePermission('customers', 'viewOnly'), getCustomers);
 
 router
   .route('/:id')
-  .get(getCustomerById)
-  .put(parseForm, validate(updateCustomerSchema), updateCustomer)
-  .delete(deleteCustomer);
+  .get(requirePermission('customers', 'viewOnly'), getCustomerById)
+  .put(requirePermission('customers', 'modify'), parseForm, validate(updateCustomerSchema), updateCustomer)
+  .delete(requirePermission('customers', 'delete'), deleteCustomer);
 
 export default router;
+

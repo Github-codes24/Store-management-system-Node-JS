@@ -9,6 +9,7 @@ import {
   deleteBrand,
 } from '../../../controllers/admin/product-management/brand.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import upload from '../../../config/storage.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
@@ -22,20 +23,21 @@ const router = Router();
 
 router.use(adminAuth);
 
-router.get('/dropdown', getBrandDropdown);
+router.get('/dropdown', requirePermission('brands', 'viewOnly'), getBrandDropdown);
 
 router
   .route('/')
-  .post(upload.any(), parseForm, validate(createBrandSchema), createBrand)
-  .get(getBrands);
+  .post(requirePermission('brands', 'create'), upload.any(), parseForm, validate(createBrandSchema), createBrand)
+  .get(requirePermission('brands', 'viewOnly'), getBrands);
 
 router
   .route('/:id')
-  .get(getBrandById)
-  .put(upload.any(), parseForm, validate(updateBrandSchema), updateBrand)
-  .delete(deleteBrand);
+  .get(requirePermission('brands', 'viewOnly'), getBrandById)
+  .put(requirePermission('brands', 'modify'), upload.any(), parseForm, validate(updateBrandSchema), updateBrand)
+  .delete(requirePermission('brands', 'delete'), deleteBrand);
 
-router.patch('/:id/status', validate(toggleStatusSchema), toggleBrandStatus);
+router.patch('/:id/status', requirePermission('brands', 'modifyStatus'), validate(toggleStatusSchema), toggleBrandStatus);
 
 export default router;
+
 

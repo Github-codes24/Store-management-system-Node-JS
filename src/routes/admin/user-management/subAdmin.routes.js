@@ -7,6 +7,7 @@ import {
   deleteSubAdmin,
 } from '../../../controllers/admin/user-management/subAdmin.controller.js';
 import adminAuth from '../../../middlewares/admin.auth.middleware.js';
+import requirePermission from '../../../middlewares/permission.middleware.js';
 import parseForm from '../../../middlewares/parseForm.middleware.js';
 import validate from '../../../middlewares/validate.middleware.js';
 import {
@@ -20,13 +21,14 @@ router.use(adminAuth);
 
 router
   .route('/')
-  .post(parseForm, validate(createSubAdminSchema), createSubAdmin)
-  .get(getSubAdmins);
+  .post(requirePermission('subAdmin', 'create'), parseForm, validate(createSubAdminSchema), createSubAdmin)
+  .get(requirePermission('subAdmin', 'viewOnly'), getSubAdmins);
 
 router
   .route('/:id')
-  .get(getSubAdminById)
-  .put(parseForm, validate(updateSubAdminSchema), updateSubAdmin)
-  .delete(deleteSubAdmin);
+  .get(requirePermission('subAdmin', 'viewOnly'), getSubAdminById)
+  .put(requirePermission('subAdmin', 'modify'), parseForm, validate(updateSubAdminSchema), updateSubAdmin)
+  .delete(requirePermission('subAdmin', 'delete'), deleteSubAdmin);
 
 export default router;
+
