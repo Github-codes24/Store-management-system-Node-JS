@@ -66,6 +66,10 @@ const env = {
   MSG91_DOMAIN: process.env.MSG91_DOMAIN || 'storemanagement.com',
   MSG91_SENDER_NAME: process.env.MSG91_SENDER_NAME || 'Store Management',
   MSG91_FROM_EMAIL: process.env.MSG91_FROM_EMAIL || 'no-reply@storemanagement.com',
+
+  // Razorpay Gateway Credentials
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || 'rzp_test_TivslxkF6yTG7S',
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || 'RGQWnuEMYJvM1C7VzJLC626F',
 };
 
 export default env;

@@ -115,13 +115,22 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       paidAmount = 0,
       dueAmount = 0,
       payments = [],
+      offerId = null,
     } = req.body;
+
+    const customerObj = (customer && typeof customer === 'object') ? customer : {
+      name: req.body.customerName || req.body.name || 'Walk-in Customer',
+      phone: req.body.customerPhone || req.body.phone || '',
+      email: req.body.customerEmail || req.body.email || '',
+      address: req.body.customerAddress || req.body.address || '',
+      customerId: req.body.customerId || null,
+    };
 
     if (!Array.isArray(items) || items.length === 0) {
       return next(badRequest('Bill must contain at least one item'));
     }
 
-    if (!customer?.name && !orderId) {
+    if (!customerObj?.name && !orderId) {
       return next(badRequest('Customer name is required for a new order'));
     }
 
@@ -185,8 +194,22 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
+    // Lookup active offer if offerId is provided
+    let appliedOffer = null;
+    if (offerId) {
+      try {
+        const Offer = (await import('../../models/offer.model.js')).default;
+        appliedOffer = await Offer.findOne({ _id: offerId, isDeleted: false, status: 'active' });
+      } catch (e) {
+        console.error('Error looking up offerId in billing:', e);
+      }
+    }
+
     // Verify products and deduct stock from selected batch
     const processedItems = [];
+    let autoComputedGross = 0;
+    let autoComputedSubtotal = 0;
+
     for (const item of items) {
       let storeProd = null;
       if (item.product) {
@@ -206,13 +229,17 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       const itemBatch = (item.batch || storeProd.batch || 'Default').trim();
       let rawQty = Number(item.quantity);
       if (isNaN(rawQty) || rawQty <= 0) rawQty = 1;
-      // Guard against accidental barcode scans into quantity (barcodes are typically >= 8-13 digits)
       if (rawQty > 9999) {
         return next(badRequest(`Invalid quantity (${item.quantity}) for product "${storeProd.productName}". Maximum allowed quantity is 9999.`));
       }
       const qty = Math.floor(rawQty);
-      const unitPrice = parseFloat(item.sellingPrice) || 0;
-      const itemTotal = unitPrice * qty;
+
+      const itemMrp = parseFloat(item.mrp !== undefined ? item.mrp : (storeProd.mrp || 0));
+      const unitPrice = parseFloat(item.sellingPrice !== undefined ? item.sellingPrice : (storeProd.offlineSellingPrice || storeProd.onlineSellingPrice || storeProd.mrp || 0));
+      const itemTotal = parseFloat(item.totalAmount !== undefined ? item.totalAmount : (unitPrice * qty));
+
+      autoComputedGross += (itemMrp * qty);
+      autoComputedSubtotal += itemTotal;
 
       // Decrement stock from specific batch in storeProduct
       if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
@@ -261,21 +288,52 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         productName: item.productName || storeProd.productName,
         barcode: item.barcode || storeProd.barcode || '',
         batch: itemBatch,
-        mrp: parseFloat(item.mrp || storeProd.mrp || 0),
+        mrp: itemMrp,
         sellingPrice: unitPrice,
         purchasePrice: parseFloat(item.purchasePrice !== undefined ? item.purchasePrice : (storeProd.purchasePrice || 0)),
         quantity: qty,
-        unit: item.unit || storeProd.unit || 'pc',
-        gstPercentage: parseFloat(item.gstPercentage || 0),
+        unit: item.unit || (storeProd.unit?.shortName || storeProd.unit?.name || 'pc'),
+        gstPercentage: parseFloat(item.gstPercentage || storeProd.gstPercentage || 0),
         totalAmount: itemTotal,
         returnedQuantity: 0,
       });
     }
 
+    // Auto calculate Gross, Subtotal, Discount & Net Amount if not provided
+    const finalGrossAmount = (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : autoComputedGross;
+    const finalSubtotal = (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : autoComputedSubtotal;
+
+    let finalDiscountType = discountType;
+    let finalDiscountValue = parseFloat(discountValue) || 0;
+    let finalDiscountAmount = parseFloat(discountAmount) || 0;
+
+    if (appliedOffer) {
+      finalDiscountType = appliedOffer.discountType === 'percentage' ? '%' : '₹';
+      finalDiscountValue = appliedOffer.discountValue || 0;
+      if (appliedOffer.discountType === 'percentage') {
+        finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
+      } else {
+        finalDiscountAmount = Math.min(finalSubtotal, finalDiscountValue);
+      }
+    } else if (finalDiscountAmount === 0 && finalDiscountValue > 0) {
+      if (finalDiscountType === '%' || finalDiscountType === 'percentage') {
+        finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
+      } else {
+        finalDiscountAmount = Math.min(finalSubtotal, finalDiscountValue);
+      }
+    }
+
+    const finalSavings = (savings && Number(savings) > 0)
+      ? parseFloat(savings)
+      : Math.max(0, finalGrossAmount - finalSubtotal + finalDiscountAmount);
+    const finalNetAmount = (netAmount && Number(netAmount) > 0)
+      ? parseFloat(netAmount)
+      : Math.max(0, finalSubtotal - finalDiscountAmount);
+
     // Customer lookup or link
-    let linkedCustomerId = customer?.customerId || null;
-    if (!linkedCustomerId && customer?.phone) {
-      const existingCustomer = await Customer.findOne({ phone: customer.phone.trim() });
+    let linkedCustomerId = customerObj.customerId || null;
+    if (!linkedCustomerId && customerObj.phone) {
+      const existingCustomer = await Customer.findOne({ phone: customerObj.phone.trim() });
       if (existingCustomer) {
         linkedCustomerId = existingCustomer._id;
       }
@@ -296,27 +354,24 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     } else if (Array.isArray(payments) && payments.length === 0) {
       // User explicitly cleared all payments (unpaid bill / full credit)
       processedPayments = [];
-    } else if (paidAmount !== undefined && paidAmount !== null && !isNaN(Number(paidAmount))) {
+    } else if (paidAmount !== undefined && paidAmount !== null && !isNaN(Number(paidAmount)) && Number(paidAmount) > 0) {
       const pAmt = parseFloat(paidAmount);
-      if (pAmt > 0) {
-        processedPayments = [
-          {
-            date: todayFormatted,
-            mode: paymentMethod || 'Cash',
-            amount: pAmt,
-            transactionId: '',
-            description: '',
-          },
-        ];
-      }
-    } else {
-      // Default to full payment in Cash only for fresh new bills when no payment array is passed
-      const nAmt = parseFloat(netAmount) || 0;
       processedPayments = [
         {
           date: todayFormatted,
           mode: paymentMethod || 'Cash',
-          amount: nAmt,
+          amount: pAmt,
+          transactionId: '',
+          description: '',
+        },
+      ];
+    } else {
+      // Default to full payment in Cash only for fresh new bills when no payment array is passed
+      processedPayments = [
+        {
+          date: todayFormatted,
+          mode: paymentMethod || 'Cash',
+          amount: finalNetAmount,
           transactionId: '',
           description: '',
         },
@@ -324,19 +379,19 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     }
 
     const calculatedPaidAmount = processedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-    const calculatedNetAmount = parseFloat(netAmount) || 0;
+    const calculatedNetAmount = finalNetAmount;
     const calculatedDueAmount = Math.max(0, calculatedNetAmount - calculatedPaidAmount);
     const calculatedPaymentStatus = calculatedPaidAmount >= calculatedNetAmount ? 'Paid' : calculatedPaidAmount > 0 ? 'Partial' : 'Unpaid';
     const primaryPaymentMethod = processedPayments[0]?.mode || paymentMethod || 'Cash';
 
     // If updating an existing bill inside this order
     if (order && existingBillIndex >= 0) {
-      if (customer?.name) {
+      if (customerObj?.name) {
         order.customer = {
-          name: customer.name.trim(),
-          phone: (customer.phone || '').trim(),
-          email: (customer.email || '').trim(),
-          address: (customer.address || '').trim(),
+          name: customerObj.name.trim(),
+          phone: (customerObj.phone || '').trim(),
+          email: (customerObj.email || '').trim(),
+          address: (customerObj.address || '').trim(),
           customerId: linkedCustomerId || order.customer?.customerId,
         };
       }
@@ -344,13 +399,14 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       const existingBill = order.bills[existingBillIndex];
       existingBill.items = processedItems;
       existingBill.totalItems = processedItems.reduce((sum, it) => sum + it.quantity, 0);
-      existingBill.grossAmount = parseFloat(grossAmount) || 0;
-      existingBill.savings = parseFloat(savings) || 0;
-      existingBill.subtotal = parseFloat(subtotal) || 0;
+      existingBill.grossAmount = (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : finalGrossAmount;
+      existingBill.savings = (savings && Number(savings) > 0) ? parseFloat(savings) : finalSavings;
+      existingBill.subtotal = (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : finalSubtotal;
       existingBill.gstTotal = parseFloat(gstTotal) || 0;
-      existingBill.discountType = discountType;
-      existingBill.discountValue = parseFloat(discountValue) || 0;
-      existingBill.discountAmount = parseFloat(discountAmount) || 0;
+      existingBill.discountType = finalDiscountType;
+      existingBill.discountValue = finalDiscountValue;
+      existingBill.discountAmount = finalDiscountAmount;
+      if (offerId) existingBill.offerId = offerId;
       existingBill.netAmount = calculatedNetAmount;
       existingBill.paymentStatus = calculatedPaymentStatus;
       existingBill.paymentMethod = primaryPaymentMethod;
@@ -403,13 +459,14 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       billDate: new Date(),
       items: processedItems,
       totalItems: processedItems.reduce((sum, it) => sum + it.quantity, 0),
-      grossAmount: parseFloat(grossAmount) || 0,
-      savings: parseFloat(savings) || 0,
-      subtotal: parseFloat(subtotal) || 0,
+      grossAmount: (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : finalGrossAmount,
+      savings: (savings && Number(savings) > 0) ? parseFloat(savings) : finalSavings,
+      subtotal: (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : finalSubtotal,
       gstTotal: parseFloat(gstTotal) || 0,
-      discountType,
-      discountValue: parseFloat(discountValue) || 0,
-      discountAmount: parseFloat(discountAmount) || 0,
+      discountType: finalDiscountType,
+      discountValue: finalDiscountValue,
+      discountAmount: finalDiscountAmount,
+      offerId: offerId || null,
       netAmount: calculatedNetAmount,
       paymentStatus: calculatedPaymentStatus,
       paymentMethod: primaryPaymentMethod,
@@ -441,10 +498,10 @@ export const createOrAppendOrderBill = async (req, res, next) => {
             store: storeId,
             employee: employeeId,
             customer: {
-              name: customer.name.trim(),
-              phone: (customer.phone || '').trim(),
-              email: (customer.email || '').trim(),
-              address: (customer.address || '').trim(),
+              name: (customerObj.name || 'Walk-in Customer').trim(),
+              phone: (customerObj.phone || '').trim(),
+              email: (customerObj.email || '').trim(),
+              address: (customerObj.address || '').trim(),
               customerId: linkedCustomerId,
             },
             bills: [newBill],

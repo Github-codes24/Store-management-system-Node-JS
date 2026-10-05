@@ -8,6 +8,7 @@ import {
   deleteStoreOffer,
   getStoreOfferFormOptions,
   exportStoreOffers,
+  getStoreBillingApplicableOffers,
 } from '../../controllers/store-employee/storeEmployee.offer.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
 import parseForm from '../../middlewares/parseForm.middleware.js';
@@ -24,6 +25,9 @@ router.use(storeEmployeeAuth);
 
 router.get('/options', getStoreOfferFormOptions);
 router.get('/export', exportStoreOffers);
+router.get('/active', getStoreBillingApplicableOffers);
+router.get('/applicable-offers', getStoreBillingApplicableOffers);
+
 
 router
   .route('/')

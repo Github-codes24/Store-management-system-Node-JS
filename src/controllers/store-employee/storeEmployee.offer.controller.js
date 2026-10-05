@@ -487,3 +487,83 @@ export const exportStoreOffers = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Get Active Applicable Offers for POS Billing & Counter Checkout
+ * GET /api/store-employee/offers/active OR /api/store-employee/billing/applicable-offers
+ */
+export const getStoreBillingApplicableOffers = async (req, res, next) => {
+  try {
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || req.query.storeId || null;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const filter = {
+      isDeleted: false,
+      status: 'active',
+      validFrom: { $lte: endOfToday },
+      validTo: { $gte: startOfToday },
+      offersOn: { $in: ['store_only', 'both'] },
+    };
+
+    if (employeeStoreId) {
+      filter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];
+    }
+
+    const offers = await Offer.find(filter)
+      .populate('stores', 'name storeCode')
+      .sort({ discountValue: -1 })
+      .lean();
+
+    const storeWideOffers = [];
+    const specialOffers = [];
+
+    const formattedOffers = offers.map((off) => {
+      const discountTag = off.discountType === 'percentage' ? `${off.discountValue}% OFF` : `₹${off.discountValue} OFF`;
+      const isStoreWide = (off.offerType === 'store_wide' || off.appliesTo === 'all') && (!off.products || off.products.length === 0);
+
+      const formatted = {
+        _id: off._id,
+        id: off._id,
+        name: off.name,
+        description: off.description,
+        offerType: off.offerType,
+        offersOn: off.offersOn,
+        discountType: off.discountType,
+        discountValue: off.discountValue,
+        discountTag,
+        appliesTo: off.appliesTo,
+        products: off.products || [],
+        sendToAllCustomers: off.sendToAllCustomers,
+        validFrom: off.validFrom,
+        validTo: off.validTo,
+        isStoreWide,
+      };
+
+      if (isStoreWide) {
+        storeWideOffers.push(formatted);
+      } else {
+        specialOffers.push(formatted);
+      }
+
+      return formatted;
+    });
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Active store offers fetched successfully for POS billing',
+        data: {
+          activeOffers: formattedOffers,
+          storeWideOffers,
+          specialOffers,
+          totalActiveOffers: formattedOffers.length,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+

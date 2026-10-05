@@ -8,6 +8,7 @@ const router = Router();
 
 import customerCmsRoutes from './customerCms.routes.js';
 import customerNotificationRoutes from './customerNotification.routes.js';
+import razorpayPaymentRoutes from './razorpayPayment.routes.js';
 
 // Customer Auth routes (/api/customer/auth)
 router.use('/auth', customerAuthRoutes);
@@ -26,5 +27,8 @@ router.use('/cms', customerCmsRoutes);
 
 // Customer Notifications routes (/api/customer/notifications)
 router.use('/notifications', customerNotificationRoutes);
+
+// Razorpay Payment Gateway routes (/api/customer/payments)
+router.use('/payments', razorpayPaymentRoutes);
 
 export default router;
