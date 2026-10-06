@@ -27,7 +27,7 @@ const adminSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['superadmin', 'admin'],
+      enum: ['superadmin', 'super_admin', 'admin', 'subadmin'],
       default: 'admin',
     },
     status: {

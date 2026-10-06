@@ -67,7 +67,16 @@ const fetchProductImagesMap = async (productIds = []) => {
  */
 export const placeOrder = async (req, res, next) => {
   try {
-    const { paymentMethod = 'COD', deliveryAddressId = null } = req.body;
+    const {
+      paymentMethod = 'COD',
+      deliveryAddressId = null,
+      customerName,
+      name,
+      customerEmail,
+      email,
+      deliveryAddress,
+      address,
+    } = req.body;
     const customerId = req.customer._id;
 
     // Fetch active cart payload
@@ -82,19 +91,69 @@ export const placeOrder = async (req, res, next) => {
       return next(notFound('Customer account not found.'));
     }
 
-    // Select delivery address if custom address ID provided
+    // Save profile details if provided during checkout
+    let profileUpdated = false;
+    const reqName = (customerName || name || '').trim();
+    if (reqName) {
+      customer.name = reqName;
+      profileUpdated = true;
+    }
+
+    const reqEmail = (customerEmail || email || '').trim().toLowerCase();
+    if (reqEmail) {
+      customer.email = reqEmail;
+      profileUpdated = true;
+    }
+
+    // Select delivery address
     let deliverToAddress = cartPayload.deliverTo;
     if (deliveryAddressId && Array.isArray(customer.addresses)) {
       const matchedAddr = customer.addresses.id(deliveryAddressId);
       if (matchedAddr) {
         deliverToAddress = {
           addressId: matchedAddr._id,
-          name: customer.name || 'Customer',
+          name: matchedAddr.name || customer.name || 'Customer',
           formattedAddress: matchedAddr.formattedAddress || customer.address || '',
-          phone: customer.phone || '',
+          phone: matchedAddr.phone || customer.phone || '',
           addressType: matchedAddr.addressType || 'Home',
         };
       }
+    } else if (deliveryAddress || address) {
+      const customAddrObj = deliveryAddress || address;
+      const addrStr = typeof customAddrObj === 'string' ? customAddrObj.trim() : (customAddrObj?.formattedAddress || customAddrObj?.address || '').trim();
+      if (addrStr) {
+        deliverToAddress = {
+          addressId: null,
+          name: customer.name || 'Customer',
+          formattedAddress: addrStr,
+          phone: customer.phone || '',
+          addressType: typeof customAddrObj === 'object' && customAddrObj.addressType ? customAddrObj.addressType : 'Home',
+        };
+        if (!customer.address) {
+          customer.address = addrStr;
+          profileUpdated = true;
+        }
+      }
+    }
+
+    if (profileUpdated) {
+      await customer.save();
+    }
+
+    // Validate Customer Profile Details (Name, Email, Delivery Address)
+    const finalName = (customer.name || '').trim();
+    if (!finalName || finalName.toLowerCase() === 'customer') {
+      return next(badRequest('Please enter your full name before placing an order.'));
+    }
+
+    const finalEmail = (customer.email || '').trim();
+    if (!finalEmail) {
+      return next(badRequest('Please enter your email address before placing an order.'));
+    }
+
+    const finalFormattedAddress = (deliverToAddress?.formattedAddress || customer.address || '').trim();
+    if (!finalFormattedAddress) {
+      return next(badRequest('Please select or enter a valid delivery address before placing an order.'));
     }
 
     const orderId = `ORD-${Date.now()}`;

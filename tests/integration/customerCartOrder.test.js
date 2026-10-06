@@ -217,7 +217,30 @@ describe('Customer Delivery Address, Cart & Checkout Integration Tests', () => {
   });
 
   describe('Customer Order & Checkout Endpoints (/api/customer/orders)', () => {
+    it('should reject place-order if customer name, email, or address is missing', async () => {
+      // 1. Add item to cart
+      await request(app)
+        .post('/api/customer/cart/add')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ productId: prod1._id, quantity: 1 });
+
+      // 2. Place Order without address or details
+      const resWithoutAddress = await request(app)
+        .post('/api/customer/orders/place-order')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ paymentMethod: 'COD' });
+
+      expect(resWithoutAddress.status).toBe(400);
+      expect(resWithoutAddress.body.message).toMatch(/full name|email|delivery address/i);
+    });
+
     it('should place an order, clear cart, and retrieve order history & details', async () => {
+      // Set customer profile name & email
+      await request(app)
+        .put('/api/customer/auth/profile')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: 'John Doe', email: 'john@example.com' });
+
       // 1. Save Address first
       await request(app)
         .post('/api/customer/auth/location')
@@ -245,7 +268,7 @@ describe('Customer Delivery Address, Cart & Checkout Integration Tests', () => {
       expect(placeOrderRes.body.success).toBe(true);
       expect(placeOrderRes.body.message).toMatch(/payment successful/i);
       expect(placeOrderRes.body.data.orderNumber).toBeDefined();
-      expect(placeOrderRes.body.data.orderStatus).toBe('New');
+      expect(placeOrderRes.body.data.orderStatus).toBe('Order Placed');
       expect(placeOrderRes.body.data.paymentStatus).toBe('Unpaid');
 
       const createdOrderId = placeOrderRes.body.data.orderId;

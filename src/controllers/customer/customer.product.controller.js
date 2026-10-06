@@ -6,6 +6,7 @@ import Subcategory from '../../models/subcategory.model.js';
 import Offer from '../../models/offer.model.js';
 import StoreOrder from '../../models/storeOrder.model.js';
 import Brand from '../../models/brand.model.js';
+import Unit from '../../models/unit.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
@@ -1127,4 +1128,79 @@ export const getCustomerOffers = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Global Search Endpoint for Customer App Top Search Bar
+ * GET /api/customer/products/search?q=... or ?search=...
+ */
+export const searchProducts = async (req, res, next) => {
+  try {
+    const { q, search, query, storeId, limit = 20 } = req.query;
+    const searchTerm = (q || search || query || '').trim();
+
+    if (!searchTerm) {
+      return res.status(200).json(
+        successResponse({
+          message: 'Search query is empty',
+          data: { query: '', products: [], categories: [], totalMatching: 0 },
+        })
+      );
+    }
+
+    const regex = new RegExp(searchTerm, 'i');
+    const baseFilter = { isDeleted: false, status: 'active' };
+
+    let storeQuery = { ...baseFilter, $or: [{ productName: regex }, { barcode: regex }] };
+    if (storeId) storeQuery.storeId = storeId;
+
+    let rawProducts = await StoreProduct.find(storeQuery)
+      .populate('productType', 'name')
+      .populate('category', 'name')
+      .populate('subcategory', 'name')
+      .populate('brand', 'name logo')
+      .populate('unit', 'name shortName')
+      .limit(Number(limit))
+      .lean();
+
+    if (rawProducts.length === 0) {
+      rawProducts = await AdminProduct.find({
+        ...baseFilter,
+        $or: [{ productName: regex }, { barcode: regex }],
+      })
+        .populate('productType', 'name')
+        .populate('category', 'name')
+        .populate('subcategory', 'name')
+        .populate('brand', 'name logo')
+        .populate('unit', 'name shortName')
+        .limit(Number(limit))
+        .lean();
+    }
+
+    // Matching Categories
+    const matchingCategories = await Category.find({
+      status: 'active',
+      name: regex,
+    })
+      .select('name image description _id')
+      .limit(5)
+      .lean();
+
+    const formattedProducts = rawProducts.map(formatCustomerProduct);
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Search results retrieved successfully',
+        data: {
+          query: searchTerm,
+          products: formattedProducts,
+          categories: matchingCategories,
+          totalMatching: formattedProducts.length,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 

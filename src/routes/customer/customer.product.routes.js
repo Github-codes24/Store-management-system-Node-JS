@@ -13,12 +13,14 @@ import {
   getPreviouslyBought,
   getSubcategoryPage,
   getFilterOptions,
+  searchProducts,
 } from '../../controllers/customer/customer.product.controller.js';
 import customerAuthMiddleware, { optionalCustomerAuth } from '../../middlewares/customer.auth.middleware.js';
 
 const router = Router();
 
 // Public / Customer Product & Catalog Endpoints
+router.get('/search', searchProducts);
 router.get('/category-tree', getCategoryTree);
 router.get('/home-dashboard', optionalCustomerAuth, getHomeDashboard);
 router.get('/subcategory-page', getSubcategoryPage);
@@ -32,6 +34,9 @@ router.get('/categories', getCustomerCategories);
 router.get('/subcategories', getCustomerSubcategories);
 router.get('/offers', getCustomerOffers);
 router.get('/products', getCustomerProducts);
+router.get('/', getCustomerProducts);
 router.get('/products/:id', getCustomerProductById);
 
 export default router;
+
+

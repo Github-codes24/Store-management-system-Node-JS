@@ -23,9 +23,9 @@ export const calculateCustomerMetrics = async (customer, storeId = null) => {
 
   const orders = await StoreOrder.find(orderQuery).sort({ createdAt: -1 }).lean();
 
-  let totalOrders = orders.length;
-  let totalBillAmount = 0;
-  let totalDueAmount = 0;
+  let totalOrders = orders.length > 0 ? orders.length : (customer.totalOrders || 0);
+  let totalBillAmount = orders.length > 0 ? 0 : (customer.totalPurchase || 0);
+  let totalDueAmount = orders.length > 0 ? 0 : (customer.amountDue || 0);
   const allBills = [];
   const productMap = new Map();
 
