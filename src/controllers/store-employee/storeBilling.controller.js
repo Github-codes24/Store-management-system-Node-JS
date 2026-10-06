@@ -5,6 +5,8 @@ import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
 import { syncCustomerMetricsInDb } from '../../utils/customerMetrics.util.js';
+import razorpayInstance from '../../config/razorpay.js';
+import env from '../../config/env.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online).
@@ -1251,6 +1253,158 @@ export const createStoreCustomer = async (req, res, next) => {
       successResponse({
         message: 'Customer saved successfully',
         data: { customer },
+      })
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Generate POS Billing Dynamic UPI QR Code for In-Store Counter Payment
+ * POST /api/store-employee/billing/generate-qr
+ * Body: { amount, billId, storeOrderId }
+ */
+export const generatePosBillingQrCode = async (req, res, next) => {
+  try {
+    const { amount, billId, storeOrderId, notes = {} } = req.body;
+
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return next(badRequest('Valid bill payment amount is required'));
+    }
+
+    const numAmount = Number(amount);
+    const amountInPaise = Math.round(numAmount * 100);
+    const refId = billId || storeOrderId || `POS_${Date.now()}`;
+
+    let qrCodeData = null;
+
+    try {
+      if (razorpayInstance && razorpayInstance.qrCode) {
+        const qrResponse = await razorpayInstance.qrCode.create({
+          type: 'upi_qr',
+          name: `POS Payment - ${refId}`,
+          usage: 'single_use',
+          fixed_amount: true,
+          payment_amount: amountInPaise,
+          description: `In-Store POS Counter Payment for ${refId}`,
+          notes: {
+            refId,
+            ...(storeOrderId ? { storeOrderId } : {}),
+            ...notes,
+          },
+        });
+
+        qrCodeData = {
+          qrId: qrResponse.id,
+          imageUrl: qrResponse.image_url,
+          status: qrResponse.status,
+          amount: numAmount,
+          refId,
+          method: 'Razorpay Dynamic QR',
+        };
+      }
+    } catch (rzpErr) {
+      console.warn('[POS Razorpay QR API Warning]:', rzpErr.message || rzpErr);
+    }
+
+    // Fallback dynamic UPI QR generator if Razorpay QR endpoint is not supported on standard test plan
+    if (!qrCodeData) {
+      const payeeAddress = env.STORE_UPI_ID || `${env.RAZORPAY_KEY_ID || 'apnamart'}@razorpay`;
+      const upiString = `upi://pay?pa=${payeeAddress}&pn=ApnaMart%20Store&am=${numAmount.toFixed(2)}&tr=${refId}&tn=POS%20Counter%20Bill`;
+      const encodedUpi = encodeURIComponent(upiString);
+      const fallbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodedUpi}`;
+
+      qrCodeData = {
+        qrId: `qr_${refId}`,
+        imageUrl: fallbackQrImageUrl,
+        upiString,
+        status: 'active',
+        amount: numAmount,
+        refId,
+        method: 'Dynamic UPI QR',
+      };
+    }
+
+    return res.status(200).json(
+      successResponse({
+        message: 'POS Billing QR Code generated successfully',
+        data: qrCodeData,
+      })
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Check POS Billing QR Code Payment Status
+ * GET /api/store-employee/billing/qr-status/:qrId
+ */
+export const checkPosBillingQrStatus = async (req, res, next) => {
+  try {
+    const { qrId } = req.params;
+
+    if (!qrId) {
+      return next(badRequest('QR ID or Reference ID parameter is required'));
+    }
+
+    // 1. Check StoreOrder database first
+    const order = await StoreOrder.findOne({
+      $or: [
+        { _id: qrId.match(/^[0-9a-fA-F]{24}$/) ? qrId : null },
+        { orderId: qrId },
+        { 'bills.billId': qrId },
+      ],
+    }).lean();
+
+    if (order) {
+      const bill = order.bills[0] || {};
+      const isPaid = bill.paymentStatus === 'Paid' || order.totalOrderPaid >= order.totalOrderNet;
+      return res.status(200).json(
+        successResponse({
+          message: 'POS payment status retrieved from database',
+          data: {
+            qrId,
+            isPaid,
+            paymentStatus: bill.paymentStatus || (isPaid ? 'Paid' : 'Unpaid'),
+            paidAmount: order.totalOrderPaid,
+            totalAmount: order.totalOrderNet,
+          },
+        })
+      );
+    }
+
+    // 2. Query Razorpay API directly if razorpay qr_ ID passed
+    if (qrId.startsWith('qr_') && razorpayInstance && razorpayInstance.qrCode) {
+      try {
+        const rzpQr = await razorpayInstance.qrCode.fetch(qrId);
+        const isPaid = rzpQr.status === 'closed' && rzpQr.payments_amount_received > 0;
+        return res.status(200).json(
+          successResponse({
+            message: 'POS payment status retrieved from Razorpay QR API',
+            data: {
+              qrId: rzpQr.id,
+              isPaid,
+              paymentStatus: isPaid ? 'Paid' : 'Unpaid',
+              paymentsAmountReceived: rzpQr.payments_amount_received / 100,
+              status: rzpQr.status,
+            },
+          })
+        );
+      } catch (err) {
+        console.warn('[Razorpay Fetch QR Warning]:', err.message);
+      }
+    }
+
+    return res.status(200).json(
+      successResponse({
+        message: 'QR Payment is pending scan/completion',
+        data: {
+          qrId,
+          isPaid: false,
+          paymentStatus: 'Unpaid',
+        },
       })
     );
   } catch (error) {

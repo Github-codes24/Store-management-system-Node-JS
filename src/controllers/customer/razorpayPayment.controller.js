@@ -100,6 +100,18 @@ export const verifyRazorpayPayment = async (req, res, next) => {
       return next(badRequest('Payment verification failed: Signature mismatch'));
     }
 
+    // Verify actual payment capture status on Razorpay Gateway
+    if (razorpay_payment_id && !razorpay_payment_id.startsWith('pay_fake') && !razorpay_payment_id.startsWith('pay_test')) {
+      try {
+        const rzpPayment = await razorpayInstance.payments.fetch(razorpay_payment_id);
+        if (rzpPayment && rzpPayment.status === 'failed') {
+          return next(badRequest('Payment failed at bank level. If amount was deducted from your account, your bank will automatically refund it within 24-48 hours. Bill was not marked as paid.'));
+        }
+      } catch (rzpFetchErr) {
+        console.warn('[Razorpay Fetch Payment Status]:', rzpFetchErr.message);
+      }
+    }
+
     // Auto-resolve target storeOrderId from body or fallback to Razorpay order notes / receipt
     let targetStoreOrderId = storeOrderId;
     if (!targetStoreOrderId && razorpay_order_id) {
@@ -258,5 +270,81 @@ export const getRazorpayPaymentStatus = async (req, res, next) => {
   } catch (error) {
     console.error('[Payment Status Error]:', error);
     return next(internal(`Failed to fetch payment status: ${error.message}`));
+  }
+};
+
+/**
+ * 4. Razorpay Webhook Handler for Asynchronous Payment Statuses (Stuck / Delayed Payments)
+ * POST /api/customer/payments/webhook or /api/payments/webhook
+ */
+export const handleRazorpayWebhook = async (req, res, next) => {
+  try {
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || env.RAZORPAY_KEY_SECRET;
+    const signature = req.headers['x-razorpay-signature'];
+
+    if (webhookSecret && signature) {
+      const shasum = crypto.createHmac('sha256', webhookSecret);
+      shasum.update(JSON.stringify(req.body));
+      const digest = shasum.digest('hex');
+
+      if (digest !== signature) {
+        console.warn('[Razorpay Webhook Warning]: Invalid webhook signature');
+        return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
+      }
+    }
+
+    const event = req.body?.event;
+    const payload = req.body?.payload;
+
+    console.log(`[Razorpay Webhook Event Received]: ${event}`);
+
+    if (event === 'payment.captured' || event === 'order.paid') {
+      const paymentEntity = payload?.payment?.entity;
+      const orderEntity = payload?.order?.entity;
+
+      const rzpOrderId = paymentEntity?.order_id || orderEntity?.id;
+      const rzpPaymentId = paymentEntity?.id;
+      const notes = paymentEntity?.notes || orderEntity?.notes || {};
+      const targetStoreOrderId = notes.storeOrderId || (orderEntity?.receipt ? orderEntity.receipt.replace(/^rcpt_/, '') : null);
+
+      if (targetStoreOrderId || rzpOrderId) {
+        const order = await StoreOrder.findOne({
+          $or: [
+            ...(targetStoreOrderId && targetStoreOrderId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: targetStoreOrderId }] : []),
+            ...(targetStoreOrderId ? [{ orderId: targetStoreOrderId }] : []),
+            ...(rzpOrderId ? [{ 'bills.payments.transactionId': rzpOrderId }] : []),
+          ],
+        });
+
+        if (order) {
+          if (Array.isArray(order.bills) && order.bills.length > 0 && order.bills[0].paymentStatus !== 'Paid') {
+            order.bills[0].paymentStatus = 'Paid';
+            order.bills[0].paymentMethod = 'UPI';
+            order.bills[0].paidAmount = order.bills[0].netAmount;
+            order.bills[0].dueAmount = 0;
+            order.bills[0].payments.push({
+              date: new Date().toISOString(),
+              mode: 'UPI',
+              amount: order.bills[0].netAmount,
+              transactionId: rzpPaymentId || rzpOrderId,
+              description: `Razorpay Webhook Auto-Capture (${event})`,
+            });
+            order.totalOrderPaid = order.totalOrderNet;
+            await order.save();
+
+            // Clear Customer Cart if payment was captured
+            if (order.customer?.customerId) {
+              await Cart.findOneAndUpdate({ customer: order.customer.customerId }, { $set: { items: [] } });
+            }
+            console.log(`[Razorpay Webhook Success]: Order ${order.orderId} updated to Paid via Webhook`);
+          }
+        }
+      }
+    }
+
+    return res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error('[Razorpay Webhook Error]:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

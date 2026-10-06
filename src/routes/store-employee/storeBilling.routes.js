@@ -9,6 +9,8 @@ import {
   processBillReturn,
   getStoreCustomers,
   createStoreCustomer,
+  generatePosBillingQrCode,
+  checkPosBillingQrStatus,
 } from '../../controllers/store-employee/storeBilling.controller.js';
 import { getStoreBillingApplicableOffers } from '../../controllers/store-employee/storeEmployee.offer.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
@@ -27,6 +29,10 @@ router.delete('/orders/:id', deleteStoreOrder);
 router.get('/customers', getStoreCustomers);
 router.post('/customers', createStoreCustomer);
 router.get('/applicable-offers', getStoreBillingApplicableOffers);
+
+// Dynamic POS QR Code Billing endpoints
+router.post('/generate-qr', generatePosBillingQrCode);
+router.get('/qr-status/:qrId', checkPosBillingQrStatus);
 
 
 // Returns endpoints
