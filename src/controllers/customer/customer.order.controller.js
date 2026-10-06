@@ -248,11 +248,12 @@ export const placeOrder = async (req, res, next) => {
     await customer.save();
 
     // Trigger customer notification
+    const orderSummaryName = formatSummaryTitle(billItems);
     try {
       await createCustomerNotificationHelper({
         customerId: customer._id,
         title: 'Order Placed',
-        message: `Your order #${newOrder.orderId} has been placed successfully.`,
+        message: `Your order for "${orderSummaryName}" has been placed successfully.`,
         type: 'Order',
         actionUrl: `/orders/${newOrder._id}`,
       });
@@ -607,11 +608,12 @@ export const cancelOrder = async (req, res, next) => {
     await ord.save();
 
     // Trigger customer notification
+    const cancelSummaryName = formatSummaryTitle(ord.bills?.[0]?.items || []);
     try {
       await createCustomerNotificationHelper({
         customerId: customerId,
         title: 'Order Cancelled',
-        message: `Your order #${ord.orderId} has been cancelled.`,
+        message: `Your order for "${cancelSummaryName}" has been cancelled.`,
         type: 'Order',
         actionUrl: `/orders/${ord._id}`,
       });

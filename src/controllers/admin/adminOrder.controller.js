@@ -465,18 +465,25 @@ export const updateAdminOrderStatus = async (req, res, next) => {
       'Cancelled': 'Order Cancelled',
     };
 
+    const items = order.bills?.[0]?.items || [];
+    const firstItemName = items.length > 0 ? (items[0].productName || 'Product') : '';
+    const extraCount = items.length - 1;
+    const orderSummaryName = firstItemName
+      ? (extraCount > 0 ? `${firstItemName} + ${extraCount} more items` : firstItemName)
+      : 'Order';
+
     const statusDescMap = {
-      'New': 'Order has been placed.',
-      'Order Placed': 'Order has been placed.',
-      'Processing': 'Your order is being prepared for delivery.',
-      'Out For Delivery': 'Your order is out for delivery.',
-      'Out for Delivery': 'Your order is out for delivery.',
-      'Delivered': 'Order delivered successfully.',
-      'Cancelled': 'Order was cancelled.',
+      'New': `Your order for "${orderSummaryName}" has been placed successfully.`,
+      'Order Placed': `Your order for "${orderSummaryName}" has been placed successfully.`,
+      'Processing': `Your order for "${orderSummaryName}" is being prepared for delivery.`,
+      'Out For Delivery': `Your order for "${orderSummaryName}" is out for delivery.`,
+      'Out for Delivery': `Your order for "${orderSummaryName}" is out for delivery.`,
+      'Delivered': `Your order for "${orderSummaryName}" was delivered successfully.`,
+      'Cancelled': `Your order for "${orderSummaryName}" was cancelled.`,
     };
 
     const title = statusTitleMap[status] || status;
-    const defaultDesc = statusDescMap[status] || `Order status updated to ${status}`;
+    const defaultDesc = statusDescMap[status] || `Your order for "${orderSummaryName}" status updated to ${status}`;
 
     order.statusHistory.push({
       status,
