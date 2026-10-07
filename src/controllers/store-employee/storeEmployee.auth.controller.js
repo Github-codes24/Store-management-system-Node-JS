@@ -34,6 +34,9 @@ export const login = async (req, res) => {
 
   const employeeObj = employee.toObject();
   delete employeeObj.password;
+  if (employeeObj.storeId) {
+    employeeObj.storeId.phone = employeeObj.storeId.mobile || '8275788392';
+  }
 
   return res.status(200).json(
     successResponse({
@@ -59,6 +62,9 @@ export const getProfile = async (req, res) => {
 
   const employeeObj = employee.toObject();
   delete employeeObj.password;
+  if (employeeObj.storeId) {
+    employeeObj.storeId.phone = employeeObj.storeId.mobile || '8275788392';
+  }
 
   return res.status(200).json(
     successResponse({
