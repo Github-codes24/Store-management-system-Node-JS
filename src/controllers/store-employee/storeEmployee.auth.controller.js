@@ -35,7 +35,10 @@ export const login = async (req, res) => {
   const employeeObj = employee.toObject();
   delete employeeObj.password;
   if (employeeObj.storeId) {
-    employeeObj.storeId.phone = employeeObj.storeId.mobile || '8275788392';
+    const rawMob = (employeeObj.storeId.mobile || employeeObj.storeId.phone || '8275788392').trim();
+    const formattedMob = rawMob.startsWith('+') ? rawMob : `+91 ${rawMob}`;
+    employeeObj.storeId.mobile = formattedMob;
+    employeeObj.storeId.phone = formattedMob;
   }
 
   return res.status(200).json(
@@ -63,7 +66,10 @@ export const getProfile = async (req, res) => {
   const employeeObj = employee.toObject();
   delete employeeObj.password;
   if (employeeObj.storeId) {
-    employeeObj.storeId.phone = employeeObj.storeId.mobile || '8275788392';
+    const rawMob = (employeeObj.storeId.mobile || employeeObj.storeId.phone || '8275788392').trim();
+    const formattedMob = rawMob.startsWith('+') ? rawMob : `+91 ${rawMob}`;
+    employeeObj.storeId.mobile = formattedMob;
+    employeeObj.storeId.phone = formattedMob;
   }
 
   return res.status(200).json(
