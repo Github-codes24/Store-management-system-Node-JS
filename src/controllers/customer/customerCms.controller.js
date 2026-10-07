@@ -25,14 +25,14 @@ export const getCustomerSupportInfo = async (_req, res, next) => {
     let settings = await Settings.findOne().lean();
     if (!settings) {
       settings = {
-        supportNumber: '+91 9876543210',
+        supportNumber: '+91 8275788392',
         supportEmail: 'support@companyname.com',
         supportTitle: "We're here to help!",
         supportSubtitle: 'Contact us using the options below.',
       };
     }
 
-    const cleanNumber = (settings.supportNumber || '+91 9876543210').replace(/\s+/g, '');
+    const cleanNumber = (settings.supportNumber || '+91 8275788392').replace(/\s+/g, '');
 
     return res.status(200).json(
       successResponse({
@@ -40,7 +40,7 @@ export const getCustomerSupportInfo = async (_req, res, next) => {
         data: {
           title: settings.supportTitle || "We're here to help!",
           subtitle: settings.supportSubtitle || 'Contact us using the options below.',
-          supportNumber: settings.supportNumber || '+91 9876543210',
+          supportNumber: settings.supportNumber || '+91 8275788392',
           supportEmail: settings.supportEmail || 'support@companyname.com',
           callActionUrl: `tel:${cleanNumber}`,
           emailActionUrl: `mailto:${settings.supportEmail || 'support@companyname.com'}`,

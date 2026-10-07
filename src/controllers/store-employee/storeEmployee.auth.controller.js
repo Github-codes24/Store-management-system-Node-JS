@@ -13,7 +13,7 @@ export const login = async (req, res) => {
   const employee = await StoreEmployee.findOne({
     userId: userId.trim(),
     isDeleted: false,
-  }).populate('storeId', 'name storeCode location');
+  }).populate('storeId', 'name storeCode location mobile email');
 
   if (!employee) {
     throw unauthorized('Invalid User ID or password');
@@ -55,7 +55,7 @@ export const logout = async (_req, res) => {
 
 export const getProfile = async (req, res) => {
   const employee = await StoreEmployee.findById(req.storeEmployee._id)
-    .populate('storeId', 'name storeCode location');
+    .populate('storeId', 'name storeCode location mobile email');
 
   const employeeObj = employee.toObject();
   delete employeeObj.password;

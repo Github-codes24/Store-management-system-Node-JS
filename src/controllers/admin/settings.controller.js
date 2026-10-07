@@ -11,7 +11,7 @@ export const getSettings = async (req, res, next) => {
     if (!settings) {
       settings = await Settings.create({
         deliveryRangeKm: 5,
-        supportNumber: '+91 9876543210',
+        supportNumber: '+91 8275788392',
         supportEmail: 'support@companyname.com',
       });
     }

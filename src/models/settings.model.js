@@ -10,7 +10,7 @@ const settingsSchema = new mongoose.Schema(
     supportNumber: {
       type: String,
       trim: true,
-      default: '+91 9876543210',
+      default: '+91 8275788392',
     },
     supportEmail: {
       type: String,
