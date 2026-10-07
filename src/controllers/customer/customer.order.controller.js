@@ -8,6 +8,7 @@ import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
 import { createCustomerNotificationHelper } from './customerNotification.controller.js';
+import razorpayInstance from '../../config/razorpay.js';
 
 /**
  * Format helper for Order Cards UI
@@ -112,21 +113,23 @@ export const placeOrder = async (req, res, next) => {
       if (matchedAddr) {
         deliverToAddress = {
           addressId: matchedAddr._id,
-          name: matchedAddr.name || customer.name || 'Customer',
-          formattedAddress: matchedAddr.formattedAddress || customer.address || '',
-          phone: matchedAddr.phone || customer.phone || '',
+          name: (matchedAddr.name || '').trim(),
+          formattedAddress: (matchedAddr.formattedAddress || customer.address || '').trim(),
+          phone: (matchedAddr.phone || customer.phone || '').trim(),
           addressType: matchedAddr.addressType || 'Home',
         };
       }
     } else if (deliveryAddress || address) {
       const customAddrObj = deliveryAddress || address;
       const addrStr = typeof customAddrObj === 'string' ? customAddrObj.trim() : (customAddrObj?.formattedAddress || customAddrObj?.address || '').trim();
+      const customName = typeof customAddrObj === 'object' && customAddrObj.name ? customAddrObj.name.trim() : '';
+      const customPhone = typeof customAddrObj === 'object' && customAddrObj.phone ? customAddrObj.phone.trim() : '';
       if (addrStr) {
         deliverToAddress = {
           addressId: null,
-          name: customer.name || 'Customer',
+          name: customName,
           formattedAddress: addrStr,
-          phone: customer.phone || '',
+          phone: customPhone || customer.phone || '',
           addressType: typeof customAddrObj === 'object' && customAddrObj.addressType ? customAddrObj.addressType : 'Home',
         };
         if (!customer.address) {
@@ -136,12 +139,21 @@ export const placeOrder = async (req, res, next) => {
       }
     }
 
+    // Auto-update profile name/phone if profile currently has generic "Customer"
+    const potentialName = (deliverToAddress?.name || reqName || '').trim();
+    if (potentialName && potentialName.toLowerCase() !== 'customer') {
+      if (!customer.name || customer.name.toLowerCase() === 'customer') {
+        customer.name = potentialName;
+        profileUpdated = true;
+      }
+    }
+
     if (profileUpdated) {
       await customer.save();
     }
 
     // Validate Customer Profile Details (Name, Email, Delivery Address)
-    const finalName = (customer.name || '').trim();
+    const finalName = (customer.name || deliverToAddress?.name || '').trim();
     if (!finalName || finalName.toLowerCase() === 'customer') {
       return next(badRequest('Please enter your full name before placing an order.'));
     }
@@ -210,10 +222,10 @@ export const placeOrder = async (req, res, next) => {
       orderId,
       store: customer.storeId || null,
       customer: {
-        name: deliverToAddress.name || customer.name || 'Customer',
-        phone: deliverToAddress.phone || customer.phone || '',
+        name: finalName,
+        phone: (deliverToAddress?.phone || customer.phone || '').trim(),
         email: customer.email || '',
-        address: deliverToAddress.formattedAddress || customer.address || '',
+        address: finalFormattedAddress,
         customerId: customer._id,
       },
       bills: [billObj],
@@ -352,8 +364,15 @@ export const getMyOrders = async (req, res, next) => {
         totalItems: primaryBill.totalItems || items.length || 0,
         totalAmount: ord.totalOrderNet || primaryBill.netAmount || 0,
         savings: primaryBill.savings || primaryBill.discountAmount || 0,
-        customerName: ord.customer?.name,
-        deliveryAddress: ord.customer?.address,
+        customerName: ord.customer?.name || 'Customer',
+        customerPhone: ord.customer?.phone || '',
+        deliveryAddress: ord.customer?.address || '',
+        deliverTo: {
+          name: ord.customer?.name || 'Customer',
+          phone: ord.customer?.phone || '',
+          formattedAddress: ord.customer?.address || '',
+          addressType: 'Home',
+        },
         createdAt: ord.createdAt,
         items,
       };
@@ -532,9 +551,16 @@ export const getOrderById = async (req, res, next) => {
       isCancelable,
       cancelReason: ord.cancelReason || '',
       deliverTo: {
-        name: ord.customer?.name,
-        phone: ord.customer?.phone,
-        formattedAddress: ord.customer?.address,
+        name: ord.customer?.name || 'Customer',
+        phone: ord.customer?.phone || '',
+        formattedAddress: ord.customer?.address || '',
+        addressType: 'Home',
+      },
+      deliveryAddress: {
+        name: ord.customer?.name || 'Customer',
+        phone: ord.customer?.phone || '',
+        formattedAddress: ord.customer?.address || '',
+        addressType: 'Home',
       },
       summary: {
         totalItemsCount: items.length,
@@ -605,13 +631,51 @@ export const cancelOrder = async (req, res, next) => {
       timestamp: new Date(),
     });
 
+    // Auto-initiate Razorpay Refund if order was paid online
+    let refundInfo = null;
+    const bill = ord.bills?.[0];
+    const isPaidOnline = bill && bill.paymentStatus === 'Paid' && (bill.paidAmount > 0 || ord.totalOrderPaid > 0);
+    const paymentTxn = (bill?.payments || []).find((p) => p.transactionId && p.transactionId.startsWith('pay_'));
+    const rzpPaymentId = paymentTxn?.transactionId || (typeof bill?.transactionId === 'string' && bill.transactionId.startsWith('pay_') ? bill.transactionId : null);
+
+    if (isPaidOnline && rzpPaymentId && razorpayInstance) {
+      try {
+        const refundAmt = bill?.paidAmount || ord.totalOrderPaid || ord.totalOrderNet;
+        const refund = await razorpayInstance.payments.refund(rzpPaymentId, {
+          amount: Math.round(refundAmt * 100),
+          notes: {
+            reason: cancelReason.trim(),
+            orderId: ord.orderId,
+            customerId: String(req.customer._id),
+          },
+        });
+        if (bill) {
+          bill.paymentStatus = 'Refunded';
+          bill.dueAmount = 0;
+        }
+        ord.totalOrderRefunded = refundAmt;
+        refundInfo = {
+          refundId: refund.id,
+          amount: refund.amount / 100,
+          status: refund.status,
+          message: 'Refund initiated successfully to your original payment account.',
+        };
+      } catch (rzpRefundErr) {
+        console.warn('[Razorpay Auto Refund Warning]:', rzpRefundErr.message || rzpRefundErr);
+        refundInfo = {
+          status: 'pending_processing',
+          message: 'Order cancelled. Refund will be processed to your account within 2-3 business days.',
+        };
+      }
+    }
+
     await ord.save();
 
     // Trigger customer notification
     const cancelSummaryName = formatSummaryTitle(ord.bills?.[0]?.items || []);
     try {
       await createCustomerNotificationHelper({
-        customerId: customerId,
+        customerId: req.customer._id,
         title: 'Order Cancelled',
         message: `Your order for "${cancelSummaryName}" has been cancelled.`,
         type: 'Order',
@@ -623,13 +687,95 @@ export const cancelOrder = async (req, res, next) => {
 
     return res.status(200).json(
       successResponse({
-        message: 'Your order has been cancelled successfully.',
+        message: isPaidOnline
+          ? 'Your order has been cancelled and refund has been initiated to your original payment method.'
+          : 'Your order has been cancelled successfully.',
         data: {
           orderId: ord._id,
           orderNumber: ord.orderId,
           orderStatus: ord.orderStatus,
           cancelReason: ord.cancelReason,
+          refundInfo,
           updatedAt: ord.updatedAt,
+        },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Request Return for Delivered Order (Customer Mobile App)
+ * POST /api/customer/orders/:orderId/return
+ * Body: { items: [{ product, quantity, reason }], returnReason }
+ */
+export const requestOrderReturn = async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const { items = [], returnReason } = req.body;
+
+    if (!returnReason || !returnReason.trim()) {
+      return next(badRequest('Please enter a reason for returning the item(s).'));
+    }
+
+    const ord = await StoreOrder.findOne({
+      _id: orderId,
+      $or: [
+        { 'customer.customerId': req.customer._id },
+        { 'customer.phone': req.customer.phone },
+      ],
+    });
+
+    if (!ord) {
+      return next(notFound('Order not found'));
+    }
+
+    const statusLower = (ord.orderStatus || '').toLowerCase();
+    if (statusLower !== 'delivered' && statusLower !== 'completed') {
+      return next(badRequest('Return can only be requested for orders that have been delivered.'));
+    }
+
+    // Record return request on order
+    const returnNumber = (ord.returns?.length || 0) + 1;
+    const returnId = `RET-${ord.orderId}-${returnNumber}`;
+
+    const newReturn = {
+      returnId,
+      items: Array.isArray(items) ? items : [],
+      returnReason: returnReason.trim(),
+      status: 'Requested',
+      requestedAt: new Date(),
+    };
+
+    if (!Array.isArray(ord.returns)) {
+      ord.returns = [];
+    }
+
+    ord.returns.push(newReturn);
+    ord.orderStatus = 'Return Requested';
+
+    if (!Array.isArray(ord.statusHistory)) {
+      ord.statusHistory = [];
+    }
+
+    ord.statusHistory.push({
+      status: 'Return Requested',
+      title: 'Return Requested',
+      description: `Customer requested return: ${returnReason.trim()}`,
+      timestamp: new Date(),
+    });
+
+    await ord.save();
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Return request submitted successfully. Our store team will process it shortly.',
+        data: {
+          returnId,
+          orderId: ord._id,
+          orderNumber: ord.orderId,
+          orderStatus: ord.orderStatus,
         },
       })
     );

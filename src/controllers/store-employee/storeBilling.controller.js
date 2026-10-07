@@ -1144,6 +1144,33 @@ export const processBillReturn = async (req, res, next) => {
       notes,
     };
 
+    // Auto-trigger Razorpay API refund if refund method is UPI/Card/Online or if bill was paid online
+    let gatewayRefundInfo = null;
+    const isOnlineRefund = ['upi', 'card', 'online', 'razorpay'].includes((refundMethod || '').toLowerCase());
+    const paymentTxn = (targetBill?.payments || []).find((p) => p.transactionId && p.transactionId.startsWith('pay_'));
+    const rzpPaymentId = paymentTxn?.transactionId || (typeof targetBill?.transactionId === 'string' && targetBill.transactionId.startsWith('pay_') ? targetBill.transactionId : null);
+
+    if (isOnlineRefund && rzpPaymentId && razorpayInstance) {
+      try {
+        const rzpRefund = await razorpayInstance.payments.refund(rzpPaymentId, {
+          amount: Math.round(totalRefund * 100),
+          notes: {
+            returnId,
+            billId,
+            orderId: order.orderId,
+            reason: notes || 'Store Return Refund',
+          },
+        });
+        gatewayRefundInfo = {
+          refundId: rzpRefund.id,
+          status: rzpRefund.status,
+          amount: rzpRefund.amount / 100,
+        };
+      } catch (rzpErr) {
+        console.warn('[Store Return Razorpay Refund Warning]:', rzpErr.message || rzpErr);
+      }
+    }
+
     order.returns.push(returnRecord);
     order.totalOrderRefunded = (order.totalOrderRefunded || 0) + totalRefund;
 

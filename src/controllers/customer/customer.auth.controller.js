@@ -298,16 +298,30 @@ export const saveCustomerLocation = async (req, res, next) => {
       return next(notFound('Customer profile not found.'));
     }
 
-    const recipientName = name || fullName || customer.name || 'Customer';
-    const recipientPhone = phone || mobileNumber || customer.phone || '';
+    const recipientName = (name || fullName || '').trim();
+    const recipientPhone = (phone || mobileNumber || '').trim();
+
+    if (recipientName && recipientName.toLowerCase() !== 'customer') {
+      if (!customer.name || customer.name.toLowerCase() === 'customer') {
+        customer.name = recipientName;
+      }
+    }
+    if (recipientPhone && !customer.phone) {
+      customer.phone = recipientPhone;
+    }
+
+    const finalRecipientName = recipientName || customer.name || 'Customer';
+    const finalRecipientPhone = recipientPhone || customer.phone || '';
 
     const parts = [flatNoStreetArea, city, state, country, pinCode ? `- ${pinCode}` : ''].filter(Boolean);
     const computedFormatted = customFormatted || parts.join(', ');
 
+    const validAddressType = ['Home', 'Work', 'Other'].includes(addressType) ? addressType : 'Home';
+
     const newAddress = {
-      name: recipientName,
-      phone: recipientPhone,
-      addressType,
+      name: finalRecipientName,
+      phone: finalRecipientPhone,
+      addressType: validAddressType,
       flatNoStreetArea,
       city,
       state,
@@ -345,12 +359,27 @@ export const saveCustomerLocation = async (req, res, next) => {
 
     await customer.save();
 
+    const formattedAddresses = (customer.addresses || []).map((addr) => {
+      const aObj = addr.toObject ? addr.toObject() : addr;
+      return {
+        ...aObj,
+        addressType: aObj.addressType || 'Home',
+      };
+    });
+
+    const currLoc = customer.currentLocation
+      ? {
+          ...(customer.currentLocation.toObject ? customer.currentLocation.toObject() : customer.currentLocation),
+          addressType: customer.currentLocation.addressType || 'Home',
+        }
+      : null;
+
     return res.status(200).json(
       successResponse({
         message: 'Customer location saved successfully',
         data: {
-          currentLocation: customer.currentLocation,
-          addresses: customer.addresses,
+          currentLocation: currLoc,
+          addresses: formattedAddresses,
           customerAddressSummary: customer.address,
         },
       })
@@ -371,12 +400,27 @@ export const getCustomerLocations = async (req, res, next) => {
       return next(notFound('Customer profile not found.'));
     }
 
+    const formattedAddresses = (customer.addresses || []).map((addr) => {
+      const aObj = addr.toObject ? addr.toObject() : addr;
+      return {
+        ...aObj,
+        addressType: aObj.addressType || 'Home',
+      };
+    });
+
+    const currLoc = customer.currentLocation
+      ? {
+          ...(customer.currentLocation.toObject ? customer.currentLocation.toObject() : customer.currentLocation),
+          addressType: customer.currentLocation.addressType || 'Home',
+        }
+      : null;
+
     return res.status(200).json(
       successResponse({
         message: 'Customer locations retrieved successfully',
         data: {
-          currentLocation: customer.currentLocation,
-          addresses: customer.addresses || [],
+          currentLocation: currLoc,
+          addresses: formattedAddresses,
           customerAddressSummary: customer.address || '',
         },
       })
