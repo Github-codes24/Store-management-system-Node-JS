@@ -310,11 +310,49 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     let finalDiscountAmount = parseFloat(discountAmount) || 0;
 
     if (appliedOffer) {
-      finalDiscountType = appliedOffer.discountType === 'percentage' ? '%' : '₹';
-      finalDiscountValue = appliedOffer.discountValue || 0;
-      if (appliedOffer.discountType === 'percentage') {
+      if (appliedOffer.discountType === 'bogo') {
+        finalDiscountType = 'BOGO';
+        const buyProdId = appliedOffer.buyDetails?.buyProduct ? String(appliedOffer.buyDetails.buyProduct) : (appliedOffer.products?.[0] ? String(appliedOffer.products[0]) : null);
+        const buyQty = Number(appliedOffer.buyDetails?.buyQuantity || 1);
+        const freeQtyRatio = Number(appliedOffer.getFreeDetails?.freeQuantity || 1);
+        const setSize = buyQty + freeQtyRatio;
+
+        let totalFreeQty = 0;
+        let unitSellingPrice = 0;
+
+        for (const pItem of processedItems) {
+          const pIdStr = String(pItem.product);
+          if (!buyProdId || pIdStr === buyProdId) {
+            const purchasedQty = pItem.quantity;
+            totalFreeQty += Math.floor(purchasedQty / setSize) * freeQtyRatio;
+            unitSellingPrice = pItem.sellingPrice;
+          }
+        }
+        finalDiscountAmount = parseFloat((totalFreeQty * unitSellingPrice).toFixed(2));
+      } else if (appliedOffer.discountType === 'bxgy') {
+        finalDiscountType = 'BXGY';
+        const buyProdId = appliedOffer.buyDetails?.buyProduct ? String(appliedOffer.buyDetails.buyProduct) : null;
+        const freeProdId = appliedOffer.getFreeDetails?.freeProduct ? String(appliedOffer.getFreeDetails.freeProduct) : null;
+        const buyQty = Number(appliedOffer.buyDetails?.buyQuantity || 1);
+        const freeQtyRatio = Number(appliedOffer.getFreeDetails?.freeQuantity || 1);
+
+        const buyItem = processedItems.find((i) => String(i.product) === buyProdId);
+        const freeItem = processedItems.find((i) => String(i.product) === freeProdId);
+
+        if (buyItem && buyItem.quantity >= buyQty && freeItem) {
+          const numSets = Math.floor(buyItem.quantity / buyQty);
+          const totalFreeQty = Math.min(freeItem.quantity, numSets * freeQtyRatio);
+          finalDiscountAmount = parseFloat((totalFreeQty * freeItem.sellingPrice).toFixed(2));
+        } else {
+          finalDiscountAmount = 0;
+        }
+      } else if (appliedOffer.discountType === 'percentage') {
+        finalDiscountType = '%';
+        finalDiscountValue = appliedOffer.discountValue || 0;
         finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
       } else {
+        finalDiscountType = '₹';
+        finalDiscountValue = appliedOffer.discountValue || 0;
         finalDiscountAmount = Math.min(finalSubtotal, finalDiscountValue);
       }
     } else if (finalDiscountAmount === 0 && finalDiscountValue > 0) {
@@ -325,10 +363,10 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
-    const finalSavings = (savings && Number(savings) > 0)
+    const finalSavings = (savings && Number(savings) > 0 && !appliedOffer)
       ? parseFloat(savings)
       : Math.max(0, finalGrossAmount - finalSubtotal + finalDiscountAmount);
-    const finalNetAmount = (netAmount && Number(netAmount) > 0)
+    const finalNetAmount = (netAmount && Number(netAmount) > 0 && !appliedOffer)
       ? parseFloat(netAmount)
       : Math.max(0, finalSubtotal - finalDiscountAmount);
 

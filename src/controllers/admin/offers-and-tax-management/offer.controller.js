@@ -118,6 +118,8 @@ export const createOffer = async (req, res, next) => {
       validTo,
       discountType,
       discountValue,
+      buyDetails,
+      getFreeDetails,
       appliesTo,
       products,
       sendToAllCustomers,
@@ -146,7 +148,9 @@ export const createOffer = async (req, res, next) => {
       validFrom: fromDate,
       validTo: toDate,
       discountType,
-      discountValue: Number(discountValue),
+      discountValue: Number(discountValue || 0),
+      buyDetails: buyDetails || { buyProduct: null, buyQuantity: 1 },
+      getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
       appliesTo: appliesTo || 'all',
       products: Array.isArray(products) ? products : [],
       sendToAllCustomers: sendToAllCustomers !== undefined ? sendToAllCustomers : true,
@@ -205,7 +209,13 @@ export const getOffers = async (req, res, next) => {
       const pushOfferTo = off.sendToAllCustomers
         ? 'All Customer'
         : `${off.targetCustomers ? off.targetCustomers.length : 0} Customer`;
-      const discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
+      
+      let discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
+      if (off.discountType === 'bogo') {
+        discountLabel = `Buy ${off.buyDetails?.buyQuantity || 1} Get ${off.getFreeDetails?.freeQuantity || 1} Free`;
+      } else if (off.discountType === 'bxgy') {
+        discountLabel = `Buy ${off.buyDetails?.buyQuantity || 1} Get ${off.getFreeDetails?.freeQuantity || 1} Free`;
+      }
 
       return {
         _id: off._id,
@@ -219,6 +229,8 @@ export const getOffers = async (req, res, next) => {
         validTo: off.validTo,
         discountType: off.discountType,
         discountValue: off.discountValue,
+        buyDetails: off.buyDetails,
+        getFreeDetails: off.getFreeDetails,
         discountLabel,
         product: productLabel,
         pushOfferTo,

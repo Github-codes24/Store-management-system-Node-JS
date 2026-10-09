@@ -208,7 +208,7 @@ const billSchema = new mongoose.Schema(
     },
     discountType: {
       type: String,
-      enum: ['₹', '%'],
+      enum: ['₹', '%', 'BOGO', 'BXGY'],
       default: '₹',
     },
     discountValue: {

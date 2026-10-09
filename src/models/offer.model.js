@@ -42,13 +42,37 @@ const offerSchema = new mongoose.Schema(
     },
     discountType: {
       type: String,
-      enum: ['percentage', 'flat'],
-      required: [true, 'Discount type (percentage or flat) is required'],
+      enum: ['percentage', 'flat', 'bogo', 'bxgy'],
+      required: [true, 'Discount type (percentage, flat, bogo, or bxgy) is required'],
     },
     discountValue: {
       type: Number,
-      required: [true, 'Discount value is required'],
+      default: 0,
       min: [0, 'Discount value cannot be negative'],
+    },
+    buyDetails: {
+      buyProduct: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'StoreProduct',
+        default: null,
+      },
+      buyQuantity: {
+        type: Number,
+        default: 1,
+        min: 1,
+      },
+    },
+    getFreeDetails: {
+      freeProduct: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'StoreProduct',
+        default: null,
+      },
+      freeQuantity: {
+        type: Number,
+        default: 1,
+        min: 1,
+      },
     },
     appliesTo: {
       type: String,

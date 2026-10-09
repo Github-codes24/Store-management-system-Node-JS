@@ -157,4 +157,33 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
+
+  it('should create and list BOGO and BXGY offers successfully', async () => {
+    const bogoRes = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Buy 1 Get 1 Free Shampoo',
+        validFrom: '2026-09-01',
+        validTo: '2026-12-31',
+        discountType: 'bogo',
+        buyDetails: {
+          buyQuantity: 1,
+        },
+        getFreeDetails: {
+          freeQuantity: 1,
+        },
+      });
+
+    expect(bogoRes.status).toBe(201);
+    expect(bogoRes.body.success).toBe(true);
+    expect(bogoRes.body.data.offer.discountType).toBe('bogo');
+
+    const listRes = await request(app)
+      .get('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.offers[0].discountLabel).toContain('Buy 1 Get 1 Free');
+  });
 });

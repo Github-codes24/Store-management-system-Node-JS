@@ -19,6 +19,8 @@ const normalizeOffersOn = (val) => {
 const normalizeDiscountType = (val) => {
   if (typeof val !== 'string') return val;
   const lower = val.toLowerCase().trim();
+  if (lower.includes('bogo')) return 'bogo';
+  if (lower.includes('bxgy')) return 'bxgy';
   if (lower.includes('price') || lower.includes('flat') || lower.includes('fixed') || lower === 'rs' || lower === '₹') return 'flat';
   return 'percentage';
 };
@@ -32,8 +34,16 @@ export const createOfferSchema = z.object({
   applyToAllStores: z.boolean().optional().default(true),
   validFrom: z.string({ required_error: 'Valid from date is required' }),
   validTo: z.string({ required_error: 'Valid to / expiry date is required' }),
-  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat'], { required_error: 'Discount type (percentage or flat) is required' })),
-  discountValue: z.coerce.number({ required_error: 'Discount value is required' }).min(0, 'Discount value cannot be negative'),
+  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy'], { required_error: 'Discount type is required' })),
+  discountValue: z.coerce.number().min(0).optional().default(0),
+  buyDetails: z.object({
+    buyProduct: z.string().optional().nullable(),
+    buyQuantity: z.coerce.number().min(1).optional().default(1),
+  }).optional(),
+  getFreeDetails: z.object({
+    freeProduct: z.string().optional().nullable(),
+    freeQuantity: z.coerce.number().min(1).optional().default(1),
+  }).optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional().default('all'),
   products: z.array(z.string()).optional().default([]),
   sendToAllCustomers: z.boolean().optional().default(true),
@@ -50,8 +60,16 @@ export const updateOfferSchema = z.object({
   applyToAllStores: z.boolean().optional(),
   validFrom: z.string().optional(),
   validTo: z.string().optional(),
-  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat'])).optional(),
+  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy'])).optional(),
   discountValue: z.coerce.number().min(0).optional(),
+  buyDetails: z.object({
+    buyProduct: z.string().optional().nullable(),
+    buyQuantity: z.coerce.number().min(1).optional(),
+  }).optional(),
+  getFreeDetails: z.object({
+    freeProduct: z.string().optional().nullable(),
+    freeQuantity: z.coerce.number().min(1).optional(),
+  }).optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional(),
   products: z.array(z.string()).optional(),
   sendToAllCustomers: z.boolean().optional(),
