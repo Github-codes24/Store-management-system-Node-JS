@@ -349,11 +349,27 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       } else if (appliedOffer.discountType === 'percentage') {
         finalDiscountType = '%';
         finalDiscountValue = appliedOffer.discountValue || 0;
-        finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
+        if (appliedOffer.appliesTo === 'product' && Array.isArray(appliedOffer.products) && appliedOffer.products.length > 0) {
+          const targetProductIds = appliedOffer.products.map(String);
+          const eligibleSubtotal = processedItems
+            .filter((pItem) => targetProductIds.includes(String(pItem.product)))
+            .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
+          finalDiscountAmount = parseFloat(((eligibleSubtotal * finalDiscountValue) / 100).toFixed(2));
+        } else {
+          finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
+        }
       } else {
         finalDiscountType = '₹';
         finalDiscountValue = appliedOffer.discountValue || 0;
-        finalDiscountAmount = Math.min(finalSubtotal, finalDiscountValue);
+        if (appliedOffer.appliesTo === 'product' && Array.isArray(appliedOffer.products) && appliedOffer.products.length > 0) {
+          const targetProductIds = appliedOffer.products.map(String);
+          const eligibleSubtotal = processedItems
+            .filter((pItem) => targetProductIds.includes(String(pItem.product)))
+            .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
+          finalDiscountAmount = Math.min(eligibleSubtotal, finalDiscountValue);
+        } else {
+          finalDiscountAmount = Math.min(finalSubtotal, finalDiscountValue);
+        }
       }
     } else if (finalDiscountAmount === 0 && finalDiscountValue > 0) {
       if (finalDiscountType === '%' || finalDiscountType === 'percentage') {

@@ -46,16 +46,36 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
       amountDue: c.amountDue || 0,
     }));
 
-    // Fetch live products (from StoreProduct first, fallback to AdminProduct)
+    // Fetch live products (from StoreProduct with storeId / store filter, fallback to all StoreProducts and AdminProducts)
     let productItems = [];
     if (employeeStoreId) {
-      const storeProducts = await StoreProduct.find({ store: employeeStoreId, isDeleted: { $ne: true } })
+      const storeProducts = await StoreProduct.find({
+        $or: [{ storeId: employeeStoreId }, { store: employeeStoreId }, { storeId: null }],
+        isDeleted: { $ne: true },
+      })
         .select('_id productName barcode batch mrp')
         .sort({ productName: 1 })
         .lean();
 
       if (storeProducts.length > 0) {
         productItems = storeProducts.map((p) => ({
+          id: p._id.toString(),
+          _id: p._id.toString(),
+          name: p.productName,
+          barcode: p.barcode || '',
+          type: 'store_product',
+        }));
+      }
+    }
+
+    if (productItems.length === 0) {
+      const allStoreProducts = await StoreProduct.find({ isDeleted: { $ne: true } })
+        .select('_id productName barcode batch mrp')
+        .sort({ productName: 1 })
+        .lean();
+
+      if (allStoreProducts.length > 0) {
+        productItems = allStoreProducts.map((p) => ({
           id: p._id.toString(),
           _id: p._id.toString(),
           name: p.productName,
@@ -93,19 +113,13 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
       type: 'category',
     }));
 
-    const combinedProductOptions = [
-      { id: 'ALL_PRODUCTS', name: 'All Products', type: 'general' },
-      ...formattedCategories,
-      ...productItems,
-    ];
-
     return res.status(200).json(
       successResponse({
         message: 'Store offer form options fetched successfully',
         data: {
           storeId: employeeStoreId ? employeeStoreId.toString() : null,
           customers: formattedCustomers,
-          products: combinedProductOptions,
+          products: productItems,
           rawProducts: productItems,
           categories: formattedCategories,
         },
@@ -184,10 +198,15 @@ export const createStoreOffer = async (req, res, next) => {
       return next(badRequest('Valid To date cannot be earlier than Valid From date'));
     }
 
+    const resolvedAppliesTo = (appliesTo === 'all' && Array.isArray(products) && products.length > 0)
+      ? 'product'
+      : (appliesTo || (Array.isArray(products) && products.length > 0 ? 'product' : 'all'));
+    const resolvedOfferType = (resolvedAppliesTo === 'product') ? 'special' : (offerType || 'store_wide');
+
     const offer = await Offer.create({
       name: name.trim(),
       description: description ? description.trim() : '',
-      offerType: offerType || 'store_wide',
+      offerType: resolvedOfferType,
       offersOn: offersOn || 'both',
       stores: employeeStoreId ? [employeeStoreId] : [],
       applyToAllStores: !employeeStoreId,
@@ -197,7 +216,7 @@ export const createStoreOffer = async (req, res, next) => {
       discountValue: Number(discountValue || 0),
       buyDetails: buyDetails || { buyProduct: null, buyQuantity: 1 },
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
-      appliesTo: appliesTo || 'all',
+      appliesTo: resolvedAppliesTo,
       products: Array.isArray(products) ? products : [],
       sendToAllCustomers: sendToAllCustomers !== undefined ? sendToAllCustomers : true,
       targetCustomers: Array.isArray(targetCustomers) ? targetCustomers : [],
