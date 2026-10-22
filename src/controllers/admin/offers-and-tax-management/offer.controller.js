@@ -7,6 +7,7 @@ import ProductType from '../../../models/productType.model.js';
 import { successResponse } from '../../../utils/api-response.js';
 import { notFound, badRequest } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
+import { enrichOffersWithProducts } from '../../../utils/offerHelper.js';
 
 /**
  * Get Pre-Requisite Options for Create/Edit Offer Form (Stores, Push Target Customers, Live DB Products & Categories)
@@ -162,12 +163,16 @@ export const createOffer = async (req, res, next) => {
     const populatedOffer = await Offer.findById(offer._id)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('createdBy', 'name email role');
+      .populate('createdBy', 'name email role')
+      .populate('buyDetails.buyProduct', 'productName name barcode')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode');
+
+    const enrichedOffer = await enrichOffersWithProducts(populatedOffer);
 
     return res.status(201).json(
       successResponse({
         message: 'Offer created successfully',
-        data: { offer: populatedOffer },
+        data: { offer: enrichedOffer },
       })
     );
   } catch (error) {
@@ -198,14 +203,17 @@ export const getOffers = async (req, res, next) => {
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email')
       .populate('createdBy', 'name email role')
+      .populate('buyDetails.buyProduct', 'productName name barcode')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode')
       .sort({ createdAt: -1 });
 
+    const enrichedOffers = await enrichOffersWithProducts(offers);
     const now = new Date();
 
-    const formattedOffers = offers.map((off) => {
+    const formattedOffers = enrichedOffers.map((off) => {
       const isExpired = new Date(off.validTo) < now;
       const displayStatus = isExpired ? 'expired' : off.status;
-      const productLabel = off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product';
+      const productLabel = off.product || (off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product');
       const pushOfferTo = off.sendToAllCustomers
         ? 'All Customer'
         : `${off.targetCustomers ? off.targetCustomers.length : 0} Customer`;
@@ -233,6 +241,7 @@ export const getOffers = async (req, res, next) => {
         getFreeDetails: off.getFreeDetails,
         discountLabel,
         product: productLabel,
+        products: off.resolvedProducts && off.resolvedProducts.length > 0 ? off.resolvedProducts : off.products,
         pushOfferTo,
         sendToAllCustomers: off.sendToAllCustomers,
         targetCustomersCount: off.targetCustomers ? off.targetCustomers.length : 0,
@@ -281,22 +290,26 @@ export const getOfferById = async (req, res, next) => {
     const offer = await Offer.findOne({ _id: id, isDeleted: false })
       .populate('stores', 'name storeCode location')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('createdBy', 'name email role');
+      .populate('createdBy', 'name email role')
+      .populate('buyDetails.buyProduct', 'productName name barcode')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode');
 
     if (!offer) {
       return next(notFound('Offer not found'));
     }
 
+    const enrichedOffer = await enrichOffersWithProducts(offer);
+
     const now = new Date();
-    const isExpired = new Date(offer.validTo) < now;
-    const displayStatus = isExpired ? 'expired' : offer.status;
+    const isExpired = new Date(enrichedOffer.validTo) < now;
+    const displayStatus = isExpired ? 'expired' : enrichedOffer.status;
 
     return res.status(200).json(
       successResponse({
         message: 'Offer details fetched successfully',
         data: {
           offer: {
-            ...offer.toObject(),
+            ...enrichedOffer,
             displayStatus,
             isExpired,
           },
@@ -342,12 +355,16 @@ export const updateOffer = async (req, res, next) => {
     const updatedOffer = await Offer.findById(id)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email')
-      .populate('createdBy', 'name email role');
+      .populate('createdBy', 'name email role')
+      .populate('buyDetails.buyProduct', 'productName name barcode')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode');
+
+    const enrichedOffer = await enrichOffersWithProducts(updatedOffer);
 
     return res.status(200).json(
       successResponse({
         message: 'Offer updated successfully',
-        data: { offer: updatedOffer },
+        data: { offer: enrichedOffer },
       })
     );
   } catch (error) {
@@ -412,11 +429,15 @@ export const deleteOffer = async (req, res, next) => {
  */
 export const exportOffers = async (_req, res, next) => {
   try {
-    const offers = await Offer.find({ isDeleted: false }).sort({ createdAt: -1 });
+    const offers = await Offer.find({ isDeleted: false })
+      .populate('buyDetails.buyProduct', 'productName name barcode')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode')
+      .sort({ createdAt: -1 });
 
+    const enrichedOffers = await enrichOffersWithProducts(offers);
     const now = new Date();
 
-    const exportData = offers.map((off, index) => {
+    const exportData = enrichedOffers.map((off, index) => {
       const isExpired = new Date(off.validTo) < now;
       const statusLabel = isExpired ? 'Expired' : off.status.charAt(0).toUpperCase() + off.status.slice(1);
       const discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
@@ -424,10 +445,10 @@ export const exportOffers = async (_req, res, next) => {
       return {
         srNo: index + 1,
         offerName: off.name,
-        product: off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product',
+        product: off.product || (off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product'),
         pushOfferTo: off.sendToAllCustomers ? 'All Customer' : `${off.targetCustomers ? off.targetCustomers.length : 0} Customer`,
         discount: discountLabel,
-        expiryDate: off.validTo.toISOString().split('T')[0],
+        expiryDate: off.validTo instanceof Date ? off.validTo.toISOString().split('T')[0] : new Date(off.validTo).toISOString().split('T')[0],
         status: statusLabel,
       };
     });

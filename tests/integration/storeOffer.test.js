@@ -6,6 +6,7 @@ import Offer from '../../src/models/offer.model.js';
 import Store from '../../src/models/store.model.js';
 import Customer from '../../src/models/customer.model.js';
 import StoreEmployee from '../../src/models/storeEmployee.model.js';
+import StoreProduct from '../../src/models/storeProduct.model.js';
 
 let mongoServer;
 let employeeToken;
@@ -185,5 +186,84 @@ describe('Store Panel Offers Integration Tests', () => {
 
     expect(listRes.status).toBe(200);
     expect(listRes.body.data.offers[0].discountLabel).toContain('Buy 1 Get 1 Free');
+  });
+
+  it('should populate buyDetails.buyProduct and getFreeDetails.freeProduct with productName and name', async () => {
+    const buyProd = await StoreProduct.create({
+      barcode: 'BOGO_BUY_001',
+      productName: 'Parle-G Biscuit 200g',
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+      stockQuantity: 50,
+      mrp: 30,
+      offlineSellingPrice: 28,
+      onlineSellingPrice: 28,
+      purchasePrice: 20,
+      storeId: storeId,
+    });
+
+    const freeProd = await StoreProduct.create({
+      barcode: 'BOGO_FREE_001',
+      productName: 'Good Day Butter 100g',
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+      stockQuantity: 50,
+      mrp: 25,
+      offlineSellingPrice: 22,
+      onlineSellingPrice: 22,
+      purchasePrice: 15,
+      storeId: storeId,
+    });
+
+    const bxgyRes = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Buy Parle-G Get Good Day Free',
+        validFrom: '2026-09-01',
+        validTo: '2026-12-31',
+        discountType: 'bxgy',
+        buyDetails: {
+          buyProduct: buyProd._id.toString(),
+          buyQuantity: 2,
+        },
+        getFreeDetails: {
+          freeProduct: freeProd._id.toString(),
+          freeQuantity: 1,
+        },
+      });
+
+    expect(bxgyRes.status).toBe(201);
+    const offerId = bxgyRes.body.data.offer._id;
+
+    // Verify GET /api/store-employee/offers
+    const listRes = await request(app)
+      .get('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(listRes.status).toBe(200);
+    const foundOffer = listRes.body.data.offers.find((o) => o._id.toString() === offerId.toString());
+    expect(foundOffer).toBeDefined();
+    expect(foundOffer.buyDetails.buyProduct.productName).toBe('Parle-G Biscuit 200g');
+    expect(foundOffer.buyDetails.buyProduct.name).toBe('Parle-G Biscuit 200g');
+    expect(foundOffer.getFreeDetails.freeProduct.productName).toBe('Good Day Butter 100g');
+    expect(foundOffer.getFreeDetails.freeProduct.name).toBe('Good Day Butter 100g');
+    expect(foundOffer.product).toContain('Parle-G Biscuit 200g -> Free: Good Day Butter 100g');
+
+    // Verify GET /api/store-employee/offers/:id
+    const singleRes = await request(app)
+      .get(`/api/store-employee/offers/${offerId}`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(singleRes.status).toBe(200);
+    expect(singleRes.body.data.offer.buyDetails.buyProduct.productName).toBe('Parle-G Biscuit 200g');
+    expect(singleRes.body.data.offer.getFreeDetails.freeProduct.productName).toBe('Good Day Butter 100g');
+    expect(singleRes.body.data.offer.product).toContain('Parle-G Biscuit 200g -> Free: Good Day Butter 100g');
   });
 });
