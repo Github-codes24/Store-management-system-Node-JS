@@ -62,6 +62,7 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
           id: p._id.toString(),
           _id: p._id.toString(),
           name: p.productName,
+          productName: p.productName,
           barcode: p.barcode || '',
           type: 'store_product',
         }));
@@ -79,6 +80,7 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
           id: p._id.toString(),
           _id: p._id.toString(),
           name: p.productName,
+          productName: p.productName,
           barcode: p.barcode || '',
           type: 'store_product',
         }));
@@ -95,6 +97,7 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
         id: p._id.toString(),
         _id: p._id.toString(),
         name: p.productName || p.name,
+        productName: p.productName || p.name,
         barcode: p.barcode || '',
         type: 'product',
       }));
