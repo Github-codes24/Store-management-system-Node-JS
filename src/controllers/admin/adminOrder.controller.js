@@ -6,6 +6,7 @@ import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
 import { getPagination } from '../../utils/pagination.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
+import { getKolkataTodayRange } from '../../utils/timezone.js';
 
 /**
  * Format flexible date (DD/MM/YYYY, YYYY-MM-DD, ISO)
@@ -48,6 +49,71 @@ const formatProductSummary = (items) => {
   const firstItemName = items[0].productName || items[0].product?.productName || 'Product';
   if (items.length === 1) return firstItemName;
   return `${firstItemName} ... +${items.length - 1} more product`;
+};
+
+/**
+ * Calculate payment stats (Cash, UPI, Card) from offline orders
+ */
+const calculateOrderPaymentStats = (orders = []) => {
+  let totalCash = 0;
+  let totalUPI = 0;
+  let totalCard = 0;
+
+  for (const o of orders) {
+    let oCash = 0;
+    let oUpi = 0;
+    let oCard = 0;
+    const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
+      ? o.payments
+      : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
+      ? o.bills[0].payments
+      : [];
+
+    if (paymentsList.length > 0) {
+      for (const p of paymentsList) {
+        const mode = (p.mode || '').trim().toLowerCase();
+        const amt = Number(p.amount) || 0;
+        if (mode === 'cash') oCash += amt;
+        else if (mode === 'upi') oUpi += amt;
+        else if (mode === 'card' || mode.includes('card')) oCard += amt;
+      }
+    }
+
+    const firstBill = o.bills?.[0] || {};
+    const netAmount = Number(firstBill.netAmount ?? o.totalOrderNet ?? 0);
+    const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
+    const effective = Math.max(0, netAmount - refunded);
+    const paid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effective);
+
+    if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
+      const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
+      if (method === 'cash') oCash = paid;
+      else if (method === 'upi') oUpi = paid;
+      else if (method === 'card' || method.includes('card')) oCard = paid;
+      else if (effective > 0) oCash = paid;
+    }
+
+    if (refunded > 0 && effective >= 0) {
+      const recorded = oCash + oUpi + oCard;
+      if (recorded > effective && recorded > 0) {
+        const ratio = effective / recorded;
+        oCash *= ratio;
+        oUpi *= ratio;
+        oCard *= ratio;
+      }
+    }
+
+    totalCash += oCash;
+    totalUPI += oUpi;
+    totalCard += oCard;
+  }
+
+  return {
+    totalCash: Math.round(totalCash * 100) / 100,
+    totalUPI: Math.round(totalUPI * 100) / 100,
+    totalCard: Math.round(totalCard * 100) / 100,
+    totalAmount: Math.round((totalCash + totalUPI + totalCard) * 100) / 100,
+  };
 };
 
 /**
@@ -110,7 +176,13 @@ export const getAdminOfflineSales = async (req, res, next) => {
     const pagination = getPagination({ page, limit, total });
     const { limit: queryLimit, skip } = pagination;
 
-    const [ordersRaw, statsOrders] = await Promise.all([
+    const { start: todayStart, end: todayEnd } = getKolkataTodayRange();
+    const todayFilter = {
+      ...filter,
+      createdAt: { $gte: todayStart, $lte: todayEnd },
+    };
+
+    const [ordersRaw, statsOrders, todayOrders] = await Promise.all([
       StoreOrder.find(filter)
         .populate('store', 'name storeCode location')
         .sort({ createdAt: -1 })
@@ -120,60 +192,20 @@ export const getAdminOfflineSales = async (req, res, next) => {
       StoreOrder.find(filter)
         .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
         .lean(),
+      StoreOrder.find(todayFilter)
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .lean(),
     ]);
 
-    let totalCash = 0;
-    let totalUPI = 0;
-    let totalCard = 0;
+    const overallStats = calculateOrderPaymentStats(statsOrders);
+    const todayStatsRaw = calculateOrderPaymentStats(todayOrders);
 
-    for (const o of statsOrders) {
-      let oCash = 0;
-      let oUpi = 0;
-      let oCard = 0;
-      const paymentsList = (Array.isArray(o.payments) && o.payments.length > 0)
-        ? o.payments
-        : (Array.isArray(o.bills?.[0]?.payments) && o.bills[0].payments.length > 0)
-        ? o.bills[0].payments
-        : [];
-
-      if (paymentsList.length > 0) {
-        for (const p of paymentsList) {
-          const mode = (p.mode || '').trim().toLowerCase();
-          const amt = Number(p.amount) || 0;
-          if (mode === 'cash') oCash += amt;
-          else if (mode === 'upi') oUpi += amt;
-          else if (mode === 'card' || mode.includes('card')) oCard += amt;
-        }
-      }
-
-      const firstBill = o.bills?.[0] || {};
-      const netAmount = Number(firstBill.netAmount ?? o.totalOrderNet ?? 0);
-      const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
-      const effective = Math.max(0, netAmount - refunded);
-      const paid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effective);
-
-      if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
-        const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
-        if (method === 'cash') oCash = paid;
-        else if (method === 'upi') oUpi = paid;
-        else if (method === 'card' || method.includes('card')) oCard = paid;
-        else if (effective > 0) oCash = paid;
-      }
-
-      if (refunded > 0 && effective >= 0) {
-        const recorded = oCash + oUpi + oCard;
-        if (recorded > effective && recorded > 0) {
-          const ratio = effective / recorded;
-          oCash *= ratio;
-          oUpi *= ratio;
-          oCard *= ratio;
-        }
-      }
-
-      totalCash += oCash;
-      totalUPI += oUpi;
-      totalCard += oCard;
-    }
+    const todayStats = {
+      todayCash: todayStatsRaw.totalCash,
+      todayUPI: todayStatsRaw.totalUPI,
+      todayCard: todayStatsRaw.totalCard,
+      todayTotal: todayStatsRaw.totalAmount,
+    };
 
     const data = ordersRaw.map((o) => {
       const allItems = o.bills?.flatMap((b) => b.items || []) || [];
@@ -257,10 +289,22 @@ export const getAdminOfflineSales = async (req, res, next) => {
         message: 'Offline sales retrieved successfully',
         data,
         stats: {
-          totalCash: Math.round(totalCash * 100) / 100,
-          totalUPI: Math.round(totalUPI * 100) / 100,
-          totalCard: Math.round(totalCard * 100) / 100,
+          totalCash: overallStats.totalCash,
+          totalUPI: overallStats.totalUPI,
+          totalCard: overallStats.totalCard,
+          totalAmount: overallStats.totalAmount,
+          todayCash: todayStats.todayCash,
+          todayUPI: todayStats.todayUPI,
+          todayCard: todayStats.todayCard,
+          todayTotal: todayStats.todayTotal,
+          formattedTotalCash: `₹ ${Math.round(overallStats.totalCash).toLocaleString('en-IN')}`,
+          formattedTotalUPI: `₹ ${Math.round(overallStats.totalUPI).toLocaleString('en-IN')}`,
+          formattedTotalCard: `₹ ${Math.round(overallStats.totalCard).toLocaleString('en-IN')}`,
+          formattedTodayCash: `₹ ${Math.round(todayStats.todayCash).toLocaleString('en-IN')}`,
+          formattedTodayUPI: `₹ ${Math.round(todayStats.todayUPI).toLocaleString('en-IN')}`,
+          formattedTodayCard: `₹ ${Math.round(todayStats.todayCard).toLocaleString('en-IN')}`,
         },
+        todayStats,
         pagination,
       })
     );
