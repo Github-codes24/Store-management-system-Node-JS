@@ -187,6 +187,18 @@ export const createOrAppendOrderBill = async (req, res, next) => {
               if (bIdx < 0) bIdx = 0;
               storeProd.batches[bIdx].stockQuantity = (Number(storeProd.batches[bIdx].stockQuantity) || 0) + oldQty;
               storeProd.stockQuantity = storeProd.batches.reduce((s, b) => s + (Number(b.stockQuantity) || 0), 0);
+              storeProd.markModified('batches');
+            } else if (Array.isArray(storeProd.batches)) {
+              storeProd.batches.push({
+                batchNumber: itemBatch || storeProd.batch || 'Default',
+                stockQuantity: oldQty,
+                mrp: storeProd.mrp || 0,
+                offlineSellingPrice: storeProd.offlineSellingPrice || 0,
+                onlineSellingPrice: storeProd.onlineSellingPrice || 0,
+              });
+              storeProd.batch = itemBatch || storeProd.batch || 'Default';
+              storeProd.stockQuantity = oldQty;
+              storeProd.markModified('batches');
             } else {
               storeProd.stockQuantity = (Number(storeProd.stockQuantity) || 0) + oldQty;
             }
@@ -279,6 +291,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
           (sum, b) => sum + (Number(b.stockQuantity) || 0),
           0
         );
+        storeProd.markModified('batches');
       } else {
         storeProd.stockQuantity = Math.max(0, (Number(storeProd.stockQuantity) || 0) - qty);
       }

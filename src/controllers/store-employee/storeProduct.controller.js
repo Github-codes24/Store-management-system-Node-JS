@@ -400,7 +400,7 @@ export const createStoreProduct = async (req, res, next) => {
         if (subcategory) existingProduct.subcategory = subcategory;
         if (brand) existingProduct.brand = brand;
         if (unit) existingProduct.unit = unit;
-        if (piece !== undefined) existingProduct.piece = Number(piece) || existingProduct.piece;
+        if (piece !== undefined) existingProduct.piece = (!isNaN(Number(piece)) && Number(piece) >= 0) ? Number(piece) : existingProduct.piece;
         if (alertQty > 0) {
           existingProduct.alertQuantity = alertQty;
           existingProduct.minStockAlert = alertQty;
@@ -535,7 +535,7 @@ export const createStoreProduct = async (req, res, next) => {
       batch: defaultInitialBatch,
       batches: initialBatches,
       unit,
-      piece: Number(piece) || 1,
+      piece: (!isNaN(Number(piece)) && Number(piece) >= 0) ? Number(piece) : 1,
       stockQuantity: incomingQty,
       alertQuantity: alertQty,
       minStockAlert: alertQty,
@@ -674,6 +674,16 @@ export const updateStoreProduct = async (req, res, next) => {
       updateData.expiryAlert = parseExpiryAlertDays(rawAlert);
     }
 
+    // Safeguard stockQuantity & piece from accidental form overwrite:
+    const isExplicitStockProvided = req.body.stockQuantity !== undefined && req.body.stockQuantity !== null && req.body.stockQuantity !== '';
+    let targetStockQuantity = existingProduct.stockQuantity;
+    if (isExplicitStockProvided) {
+      const parsedStock = Number(req.body.stockQuantity);
+      if (!isNaN(parsedStock) && parsedStock >= 0) {
+        targetStockQuantity = parsedStock;
+      }
+    }
+
     if (existingProduct.batches && existingProduct.batches.length > 0) {
       const activeBatchName = updateData.batch || existingProduct.batch;
       let batchToUpdate = existingProduct.batches.find(
@@ -701,8 +711,32 @@ export const updateStoreProduct = async (req, res, next) => {
         if (updateData.expiryAlert !== undefined) {
           batchToUpdate.expiryAlert = updateData.expiryAlert;
         }
+        // If stockQuantity was explicitly provided, update the active batch stock
+        if (isExplicitStockProvided) {
+          batchToUpdate.stockQuantity = targetStockQuantity;
+        }
         updateData.batches = existingProduct.batches;
       }
+
+      // Total stockQuantity is strictly the sum of all active batches
+      updateData.stockQuantity = existingProduct.batches.reduce(
+        (sum, b) => sum + (Number(b.stockQuantity) || 0),
+        0
+      );
+    } else {
+      // If no batches exist (e.g. out-of-stock product where batches was emptied)
+      if (isExplicitStockProvided) {
+        updateData.stockQuantity = targetStockQuantity;
+      } else {
+        // Keep existing stockQuantity (0 remains 0)
+        updateData.stockQuantity = existingProduct.stockQuantity;
+      }
+    }
+
+    // Piece safeguard: preserve existing piece or valid non-negative number, never coerce 0 to 1
+    if (updateData.piece !== undefined && updateData.piece !== null) {
+      const parsedPiece = Number(updateData.piece);
+      updateData.piece = !isNaN(parsedPiece) && parsedPiece >= 0 ? parsedPiece : existingProduct.piece;
     }
 
     const updatedProduct = await StoreProduct.findByIdAndUpdate(

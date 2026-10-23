@@ -644,5 +644,40 @@ describe('Product Inventory: Manufacture Date, Expiry Date & Priority Sorting', 
       expect(seeAllFound).toBeDefined();
       expect(seeAllFound.expiryAlert).toBe(25);
     });
+
+    it('should NOT overwrite 0 stock to 1 when updating product details via PUT /api/store-employee/products/:id', async () => {
+      // 1. Create a product with 0 stock
+      const prod = await StoreProduct.create({
+        barcode: 'BC_ZERO_STOCK_ITEM',
+        productName: 'Zero Stock Face Wash',
+        productType: testProductType._id,
+        category: testCategory._id,
+        subcategory: testSubcategory._id,
+        brand: testBrand._id,
+        unit: testUnit._id,
+        mrp: 150,
+        offlineSellingPrice: 140,
+        onlineSellingPrice: 145,
+        stockQuantity: 0,
+        batches: [],
+        storeId: testStore._id,
+      });
+
+      // 2. Update price / category without explicit stock edit
+      const updateRes = await request(app)
+        .put(`/api/store-employee/products/${prod._id}`)
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .field('productName', 'Zero Stock Face Wash Updated')
+        .field('mrp', 160)
+        .field('offlineSellingPrice', 150);
+
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.data.product.stockQuantity).toBe(0);
+      expect(updateRes.body.data.stockStatus).toBe('Out of Stock');
+
+      // 3. Verify in DB directly
+      const refreshed = await StoreProduct.findById(prod._id);
+      expect(refreshed.stockQuantity).toBe(0);
+    });
   });
 });

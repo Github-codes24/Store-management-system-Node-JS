@@ -245,6 +245,42 @@ export const placeOrder = async (req, res, next) => {
 
     await newOrder.save();
 
+    // Deduct stock for ordered items from store inventory
+    for (const item of cartPayload.items) {
+      if (!item.productId) continue;
+      const orderedQty = Math.max(1, Number(item.quantity) || 1);
+
+      const storeProd = await StoreProduct.findOne({
+        _id: item.productId,
+        isDeleted: false,
+      });
+
+      if (storeProd) {
+        if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
+          let remainingToDeduct = orderedQty;
+          for (let b = 0; b < storeProd.batches.length && remainingToDeduct > 0; b++) {
+            const currentBatchStock = Number(storeProd.batches[b].stockQuantity) || 0;
+            if (currentBatchStock > 0) {
+              const deduct = Math.min(currentBatchStock, remainingToDeduct);
+              storeProd.batches[b].stockQuantity = currentBatchStock - deduct;
+              remainingToDeduct -= deduct;
+            }
+          }
+          // Remove batches that have reached 0 stock
+          storeProd.batches = storeProd.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0);
+          storeProd.batch = storeProd.batches.length > 0 ? (storeProd.batches[0].batchNumber || '') : '';
+          storeProd.stockQuantity = storeProd.batches.reduce(
+            (sum, b) => sum + (Number(b.stockQuantity) || 0),
+            0
+          );
+          storeProd.markModified('batches');
+        } else {
+          storeProd.stockQuantity = Math.max(0, (Number(storeProd.stockQuantity) || 0) - orderedQty);
+        }
+        await storeProd.save();
+      }
+    }
+
     // Clear Customer Cart ONLY for COD orders (for online payments, cart is cleared upon successful verification)
     if (paymentMethod.toUpperCase() === 'COD') {
       const cart = await Cart.findOne({ customer: customerId });
