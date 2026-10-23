@@ -27,36 +27,8 @@ export const getOfferFormOptions = async (req, res, next) => {
       storeCode: s.storeCode,
     }));
 
-    const customerFilter = { status: 'active' };
-
-    // Filter customers by storeId or storeIds if provided
-    if (storeIds) {
-      const idList = Array.isArray(storeIds)
-        ? storeIds
-        : storeIds.split(',').map((id) => id.trim()).filter(Boolean);
-      customerFilter.$or = [
-        { storeId: { $in: idList } },
-        { storeId: null },
-      ];
-    } else if (storeId) {
-      customerFilter.$or = [
-        { storeId: storeId },
-        { storeId: null },
-      ];
-    }
-
-    const customers = await Customer.find(customerFilter)
-      .select('_id name phone email storeId totalPurchase amountDue')
-      .sort({ name: 1 });
-
-    const formattedCustomers = customers.map((c) => ({
-      id: c._id.toString(),
-      name: c.name,
-      mobile: c.phone,
-      storeId: c.storeId ? c.storeId.toString() : null,
-      totalPurchase: c.totalPurchase || 0,
-      amountDue: c.amountDue || 0,
-    }));
+    // Customers list removed: all offers are broadcast to all customers automatically
+    const formattedCustomers = [];
 
     // Fetch live products from AdminProduct collection
     const liveProducts = await AdminProduct.find({ isDeleted: false, status: 'active' })
@@ -154,8 +126,8 @@ export const createOffer = async (req, res, next) => {
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
       appliesTo: appliesTo || 'all',
       products: Array.isArray(products) ? products : [],
-      sendToAllCustomers: sendToAllCustomers !== undefined ? sendToAllCustomers : true,
-      targetCustomers: Array.isArray(targetCustomers) ? targetCustomers : [],
+      sendToAllCustomers: true,
+      targetCustomers: [],
       status: status || 'active',
       createdBy: req.admin?._id,
     });

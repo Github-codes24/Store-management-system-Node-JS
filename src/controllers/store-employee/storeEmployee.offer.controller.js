@@ -15,37 +15,8 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
   try {
     const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
 
-    // Fetch live customers registered at this employee's assigned store (or storeId null)
-    const customerFilter = { status: 'active' };
-    if (employeeStoreId) {
-      customerFilter.$or = [
-        { storeId: employeeStoreId },
-        { storeId: null },
-      ];
-    }
-
-    let customers = await Customer.find(customerFilter)
-      .select('_id name phone email storeId totalPurchase amountDue')
-      .sort({ name: 1 })
-      .lean();
-
-    if (customers.length === 0) {
-      customers = await Customer.find({ status: 'active' })
-        .select('_id name phone email storeId totalPurchase amountDue')
-        .sort({ name: 1 })
-        .lean();
-    }
-
-    const formattedCustomers = customers.map((c) => ({
-      id: c._id.toString(),
-      _id: c._id.toString(),
-      name: c.name,
-      mobile: c.phone,
-      phone: c.phone,
-      storeId: c.storeId ? c.storeId.toString() : null,
-      totalPurchase: c.totalPurchase || 0,
-      amountDue: c.amountDue || 0,
-    }));
+    // Customers list removed: all offers are broadcast to all customers automatically
+    const formattedCustomers = [];
 
     // Fetch live products (from StoreProduct with storeId / store filter, fallback to all StoreProducts and AdminProducts)
     let productItems = [];
@@ -222,8 +193,8 @@ export const createStoreOffer = async (req, res, next) => {
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
       appliesTo: resolvedAppliesTo,
       products: Array.isArray(products) ? products : [],
-      sendToAllCustomers: sendToAllCustomers !== undefined ? sendToAllCustomers : true,
-      targetCustomers: Array.isArray(targetCustomers) ? targetCustomers : [],
+      sendToAllCustomers: true,
+      targetCustomers: [],
       status: status || 'active',
     });
 

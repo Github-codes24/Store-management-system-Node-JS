@@ -59,7 +59,7 @@ describe('Offers Management Integration Tests', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should fetch offer form options (stores, customers, products)', async () => {
+  it('should fetch offer form options (stores, products without customer list)', async () => {
     const res = await request(app)
       .get('/api/admin/offers-and-tax-management/offers/options')
       .set('Authorization', `Bearer ${adminToken}`);
@@ -67,7 +67,8 @@ describe('Offers Management Integration Tests', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.stores.length).toBeGreaterThan(0);
-    expect(res.body.data.customers.length).toBeGreaterThan(0);
+    expect(Array.isArray(res.body.data.customers)).toBe(true);
+    expect(res.body.data.customers.length).toBe(0);
   });
 
   it('should create a new Store-Wide Offer', async () => {

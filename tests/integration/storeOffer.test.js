@@ -71,15 +71,15 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should fetch store offer form options with store-scoped customers', async () => {
+  it('should fetch store offer form options without customer list (all customers by default)', async () => {
     const res = await request(app)
       .get('/api/store-employee/offers/options')
       .set('Authorization', `Bearer ${employeeToken}`);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.customers.length).toBeGreaterThan(0);
-    expect(res.body.data.customers[0].name).toBe('Brooklyn Simmons');
+    expect(Array.isArray(res.body.data.customers)).toBe(true);
+    expect(res.body.data.customers.length).toBe(0);
   });
 
   it('should create a new Store Offer from store panel', async () => {
