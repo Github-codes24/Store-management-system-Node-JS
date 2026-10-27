@@ -2,14 +2,65 @@ import StoreOrder from '../models/storeOrder.model.js';
 import Customer from '../models/customer.model.js';
 
 /**
+ * Helper to identify Walk-in or default anonymous customers
+ * who do not track individual loyalty, purchase history, or credit.
+ */
+export const isWalkInCustomer = (customer) => {
+  if (!customer) return true;
+  const phone = (customer.phone || '').toString().trim();
+  const name = (customer.name || '').toString().trim().toLowerCase();
+
+  // Any phone that is blank, 0, all zeros, or missing
+  if (!phone || phone === '0' || /^0+$/.test(phone)) {
+    return true;
+  }
+
+  // Any name matching walk-in variants
+  if (
+    name === 'walk-in customer' ||
+    name === 'walkin customer' ||
+    name === 'walk-in' ||
+    name === 'walkin' ||
+    name.includes('walk-in') ||
+    name.includes('walkin')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
  * Calculate accurate real-time metrics, spent chart, top products, and bills for a single customer
  * from all non-cancelled StoreOrders.
  */
 export const calculateCustomerMetrics = async (customer, storeId = null) => {
   if (!customer) return null;
 
+  // Short-circuit for Walk-in or anonymous customers to avoid scanning thousands of store orders
+  if (isWalkInCustomer(customer)) {
+    return {
+      totalOrders: customer.totalOrders || 0,
+      totalBillAmount: customer.totalPurchase || 0,
+      totalDueAmount: customer.amountDue || 0,
+      summary: {
+        totalStoreVisits: customer.totalStoreVisits || 0,
+        averageBillValue: 0,
+        totalItemsPurchased: 0,
+        lastPurchaseDate: null,
+      },
+      spentChart: {
+        year: new Date().getFullYear(),
+        monthlyTotals: new Array(12).fill(0),
+      },
+      topProducts: [],
+      bills: [],
+      orders: [],
+    };
+  }
+
   const customerId = customer._id;
-  const customerPhone = customer.phone && customer.phone.trim() && customer.phone.trim() !== '0000000000'
+  const customerPhone = customer.phone && customer.phone.trim() && !/^0+$/.test(customer.phone.trim())
     ? customer.phone.trim()
     : null;
 
@@ -164,10 +215,21 @@ export const calculateCustomerMetrics = async (customer, storeId = null) => {
 export const batchPopulateCustomerMetrics = async (customers, storeId = null) => {
   if (!Array.isArray(customers) || customers.length === 0) return customers;
 
-  const customerIds = customers.map((c) => c._id).filter(Boolean);
-  const customerPhones = customers
+  // Filter out anonymous walk-in records so we do not query thousands of walk-in orders
+  const validCustomers = customers.filter((c) => !isWalkInCustomer(c));
+  const customerIds = validCustomers.map((c) => c._id).filter(Boolean);
+  const customerPhones = validCustomers
     .map((c) => (c.phone || '').trim())
-    .filter((p) => p && p !== '0000000000');
+    .filter((p) => p && p !== '0' && !/^0+$/.test(p));
+
+  if (customerIds.length === 0 && customerPhones.length === 0) {
+    for (const c of customers) {
+      c.totalPurchase = Number(c.totalPurchase) || 0;
+      c.amountDue = Number(c.amountDue) || 0;
+      c.totalOrders = Number(c.totalOrders) || 0;
+    }
+    return customers;
+  }
 
   const orderQuery = {
     $or: [
@@ -193,7 +255,7 @@ export const batchPopulateCustomerMetrics = async (customers, storeId = null) =>
       if (!ordersByCustId.has(custId)) ordersByCustId.set(custId, []);
       ordersByCustId.get(custId).push(order);
     }
-    if (phone && phone !== '0000000000') {
+    if (phone && phone !== '0' && !/^0+$/.test(phone)) {
       if (!ordersByPhone.has(phone)) ordersByPhone.set(phone, []);
       ordersByPhone.get(phone).push(order);
     }
@@ -201,6 +263,13 @@ export const batchPopulateCustomerMetrics = async (customers, storeId = null) =>
 
   // Populate metrics for each customer in array
   for (const c of customers) {
+    if (isWalkInCustomer(c)) {
+      c.totalPurchase = Number(c.totalPurchase) || 0;
+      c.amountDue = Number(c.amountDue) || 0;
+      c.totalOrders = Number(c.totalOrders) || 0;
+      continue;
+    }
+
     const cid = c._id ? c._id.toString() : null;
     const phone = (c.phone || '').trim();
 
@@ -211,7 +280,7 @@ export const batchPopulateCustomerMetrics = async (customers, storeId = null) =>
         matchedOrdersMap.set(o._id.toString(), o);
       }
     }
-    if (phone && phone !== '0000000000' && ordersByPhone.has(phone)) {
+    if (phone && phone !== '0' && !/^0+$/.test(phone) && ordersByPhone.has(phone)) {
       for (const o of ordersByPhone.get(phone)) {
         matchedOrdersMap.set(o._id.toString(), o);
       }
@@ -270,11 +339,24 @@ export const batchPopulateCustomerMetrics = async (customers, storeId = null) =>
 export const syncCustomerMetricsInDb = async (customerId, phone = null) => {
   if (!customerId && !phone) return null;
 
+  // Skip dummy walk-in phone
+  if (phone) {
+    const trimmedPhone = phone.toString().trim();
+    if (!trimmedPhone || trimmedPhone === '0' || /^0+$/.test(trimmedPhone)) {
+      return null;
+    }
+  }
+
   const customer = customerId
     ? await Customer.findById(customerId)
-    : await Customer.findOne({ phone: phone.trim() });
+    : await Customer.findOne({ phone: phone.toString().trim() });
 
   if (!customer) return null;
+
+  // Skip walk-in or anonymous customer sync
+  if (isWalkInCustomer(customer)) {
+    return customer;
+  }
 
   const metrics = await calculateCustomerMetrics(customer);
   if (!metrics) return null;

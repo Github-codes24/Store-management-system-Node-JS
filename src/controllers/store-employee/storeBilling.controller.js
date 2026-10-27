@@ -4,7 +4,7 @@ import Customer from '../../models/customer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
-import { syncCustomerMetricsInDb } from '../../utils/customerMetrics.util.js';
+import { syncCustomerMetricsInDb, isWalkInCustomer } from '../../utils/customerMetrics.util.js';
 import razorpayInstance from '../../config/razorpay.js';
 import env from '../../config/env.js';
 
@@ -399,12 +399,15 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       ? parseFloat(netAmount)
       : Math.max(0, finalSubtotal - finalDiscountAmount);
 
-    // Customer lookup or link
+    // Customer lookup or link (skip linking dummy walk-in phone)
     let linkedCustomerId = customerObj.customerId || null;
     if (!linkedCustomerId && customerObj.phone) {
-      const existingCustomer = await Customer.findOne({ phone: customerObj.phone.trim() });
-      if (existingCustomer) {
-        linkedCustomerId = existingCustomer._id;
+      const cleanPhone = customerObj.phone.trim();
+      if (cleanPhone && cleanPhone !== '0' && !/^0+$/.test(cleanPhone)) {
+        const existingCustomer = await Customer.findOne({ phone: cleanPhone });
+        if (existingCustomer) {
+          linkedCustomerId = existingCustomer._id;
+        }
       }
     }
 
@@ -493,11 +496,13 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       order.markModified('payments');
       await order.save();
 
-      // Synchronize customer's metrics in background / immediately
-      if (order.customer?.customerId) {
-        await syncCustomerMetricsInDb(order.customer.customerId).catch(() => {});
-      } else if (order.customer?.phone) {
-        await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+      // Synchronize customer's metrics in background / immediately (skip for walk-in)
+      if (!isWalkInCustomer(order.customer)) {
+        if (order.customer?.customerId) {
+          await syncCustomerMetricsInDb(order.customer.customerId).catch(() => {});
+        } else if (order.customer?.phone) {
+          await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+        }
       }
 
       return res.status(200).json(
@@ -597,12 +602,14 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
-    // Synchronize customer's metrics in DB
-    const custId = order.customer?.customerId || linkedCustomerId;
-    if (custId) {
-      await syncCustomerMetricsInDb(custId).catch(() => {});
-    } else if (order.customer?.phone) {
-      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+    // Synchronize customer's metrics in DB (skip for walk-in)
+    if (!isWalkInCustomer(order.customer)) {
+      const custId = order.customer?.customerId || linkedCustomerId;
+      if (custId) {
+        await syncCustomerMetricsInDb(custId).catch(() => {});
+      } else if (order.customer?.phone) {
+        await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+      }
     }
 
     return res.status(201).json(
@@ -918,7 +925,7 @@ export const updateOrderStatus = async (req, res, next) => {
       if (custDoc) targetCustomerId = custDoc._id;
     }
 
-    if (targetCustomerId) {
+    if (targetCustomerId && !isWalkInCustomer(order.customer)) {
       try {
         await syncCustomerMetricsInDb(targetCustomerId).catch(() => {});
         await createCustomerNotificationHelper({
@@ -960,12 +967,14 @@ export const deleteStoreOrder = async (req, res, next) => {
       return next(notFound('Order not found'));
     }
 
-    // Sync metrics for customer
-    const custId = order.customer?.customerId || order.customerId;
-    if (custId) {
-      await syncCustomerMetricsInDb(custId).catch(() => {});
-    } else if (order.customer?.phone) {
-      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+    // Sync metrics for customer (skip for walk-in)
+    if (!isWalkInCustomer(order.customer)) {
+      const custId = order.customer?.customerId || order.customerId;
+      if (custId) {
+        await syncCustomerMetricsInDb(custId).catch(() => {});
+      } else if (order.customer?.phone) {
+        await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+      }
     }
 
     return res.status(200).json(
@@ -1262,12 +1271,14 @@ export const processBillReturn = async (req, res, next) => {
     order.markModified('returns');
     await order.save();
 
-    // Synchronize customer metrics
-    const custId = order.customer?.customerId || order.customerId;
-    if (custId) {
-      await syncCustomerMetricsInDb(custId).catch(() => {});
-    } else if (order.customer?.phone) {
-      await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+    // Synchronize customer metrics (skip for walk-in)
+    if (!isWalkInCustomer(order.customer)) {
+      const custId = order.customer?.customerId || order.customerId;
+      if (custId) {
+        await syncCustomerMetricsInDb(custId).catch(() => {});
+      } else if (order.customer?.phone) {
+        await syncCustomerMetricsInDb(null, order.customer.phone).catch(() => {});
+      }
     }
 
     return res.status(201).json(
