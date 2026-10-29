@@ -440,7 +440,8 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(offerRes.status).toBe(201);
     const createdOfferId = offerRes.body.data.offer._id;
 
-    // 3. During active offer, product list should dynamically return offlineSellingPrice = 50
+    // 3. During active offer, product list should keep offlineSellingPrice = 100 (standard inventory rate)
+    // and provide promotionalSellingPrice = 50 with hasActiveOffer = true
     const duringRes = await request(app)
       .get('/api/store-employee/products')
       .set('Authorization', `Bearer ${employeeToken}`)
@@ -449,9 +450,11 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(duringRes.status).toBe(200);
     const prodDuring = duringRes.body.data.find((p) => p.barcode === 'PROD_CATALOG_TEST_001');
     expect(prodDuring).toBeDefined();
-    expect(prodDuring.offlineSellingPrice).toBe(50);
-    expect(prodDuring.originalOfflineSellingPrice).toBe(100);
-    expect(prodDuring.hasOffer).toBe(true);
+    expect(prodDuring.offlineSellingPrice).toBe(100); // Standard catalog price
+    expect(prodDuring.promotionalSellingPrice).toBe(50); // Meaningful offer price field
+    expect(prodDuring.hasActiveOffer).toBe(true);
+    expect(prodDuring.activeOffer).toBeDefined();
+    expect(prodDuring.activeOffer.promotionalSellingPrice).toBe(50);
 
     // 4. During billing, bill item should use 50, and Net Payable should be 45 (50 - 10% = 45)
     // even if client sends stale subtotal = 100 and savings = 20
@@ -484,7 +487,7 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(createdBill.discountAmount).toBe(5);
     expect(createdBill.netAmount).toBe(45);
 
-    // 5. When offer is deactivated, product list should immediately revert back to 100
+    // 5. When offer is deactivated, promotionalSellingPrice is cleared
     const toggleRes = await request(app)
       .patch(`/api/store-employee/offers/${createdOfferId}/status`)
       .set('Authorization', `Bearer ${employeeToken}`)
@@ -501,6 +504,8 @@ describe('Store Panel Offers Integration Tests', () => {
     const prodAfter = afterDeactivateRes.body.data.find((p) => p.barcode === 'PROD_CATALOG_TEST_001');
     expect(prodAfter).toBeDefined();
     expect(prodAfter.offlineSellingPrice).toBe(100);
-    expect(prodAfter.hasOffer).toBe(false);
+    expect(prodAfter.promotionalSellingPrice).toBeNull();
+    expect(prodAfter.hasActiveOffer).toBe(false);
+    expect(prodAfter.activeOffer).toBeNull();
   });
 });

@@ -205,9 +205,8 @@ export const getStoreProducts = async (req, res, next) => {
       const unitShortName = product.unit?.shortName || product.unit?.name || 'pc';
       const brandName = product.brand?.name || '—';
       const promoInfo = activePricingMap.get(String(product._id));
-      const effectiveOfflineSellingPrice = (promoInfo && promoInfo.updatedSellingPrice !== undefined)
-        ? promoInfo.updatedSellingPrice
-        : product.offlineSellingPrice;
+      const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
+      const promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
 
       return {
         _id: product._id,
@@ -231,10 +230,18 @@ export const getStoreProducts = async (req, res, next) => {
         piece: product.piece,
         mrp: product.mrp,
         onlineSellingPrice: product.onlineSellingPrice,
-        offlineSellingPrice: effectiveOfflineSellingPrice,
-        originalOfflineSellingPrice: product.offlineSellingPrice,
-        hasOffer: Boolean(promoInfo),
-        offerName: promoInfo ? promoInfo.offerName : undefined,
+        offlineSellingPrice: product.offlineSellingPrice,
+        promotionalSellingPrice,
+        hasActiveOffer: hasOffer,
+        activeOffer: hasOffer
+          ? {
+              offerId: promoInfo.offerId,
+              offerName: promoInfo.offerName,
+              promotionalSellingPrice: promoInfo.updatedSellingPrice,
+              discountType: promoInfo.discountType,
+              discountValue: promoInfo.discountValue,
+            }
+          : null,
         purchasePrice: product.purchasePrice,
         stockQuantity: product.stockQuantity,
         stockDisplay: `${product.stockQuantity} ${unitShortName}`,
@@ -295,12 +302,18 @@ export const getStoreProductById = async (req, res, next) => {
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
     const activePricingMap = await getActiveProductPricingMap(storeId);
     const promoInfo = activePricingMap.get(String(product._id));
-    if (promoInfo && promoInfo.updatedSellingPrice !== undefined) {
-      product.originalOfflineSellingPrice = product.offlineSellingPrice;
-      product.offlineSellingPrice = promoInfo.updatedSellingPrice;
-      product.hasOffer = true;
-      product.offerName = promoInfo.offerName;
-    }
+    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
+    product.promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
+    product.hasActiveOffer = hasOffer;
+    product.activeOffer = hasOffer
+      ? {
+          offerId: promoInfo.offerId,
+          offerName: promoInfo.offerName,
+          promotionalSellingPrice: promoInfo.updatedSellingPrice,
+          discountType: promoInfo.discountType,
+          discountValue: promoInfo.discountValue,
+        }
+      : null;
 
     return res.status(200).json(
       successResponse({
@@ -1159,13 +1172,19 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
 
     const activePricingMap = await getActiveProductPricingMap(storeId);
     const promoInfo = activePricingMap.get(String(product._id));
+    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
     let productData = product.toObject ? product.toObject() : product;
-    if (promoInfo && promoInfo.updatedSellingPrice !== undefined) {
-      productData.originalOfflineSellingPrice = productData.offlineSellingPrice;
-      productData.offlineSellingPrice = promoInfo.updatedSellingPrice;
-      productData.hasOffer = true;
-      productData.offerName = promoInfo.offerName;
-    }
+    productData.promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
+    productData.hasActiveOffer = hasOffer;
+    productData.activeOffer = hasOffer
+      ? {
+          offerId: promoInfo.offerId,
+          offerName: promoInfo.offerName,
+          promotionalSellingPrice: promoInfo.updatedSellingPrice,
+          discountType: promoInfo.discountType,
+          discountValue: promoInfo.discountValue,
+        }
+      : null;
 
     return res.status(200).json(
       successResponse({

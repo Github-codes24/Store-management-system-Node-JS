@@ -245,6 +245,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
               $or: [
                 { 'productPricing.product': { $in: itemProdIds } },
                 { products: { $in: itemProdIds } },
+                { 'buyDetails.buyProduct': { $in: itemProdIds } },
+                { 'getFreeDetails.freeProduct': { $in: itemProdIds } },
                 { 'productPricing.0': { $exists: true } },
               ],
             },
