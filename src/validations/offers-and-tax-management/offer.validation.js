@@ -26,7 +26,21 @@ const normalizeDiscountType = (val) => {
   return 'percentage';
 };
 
-export const productPricingItemZodSchema = z.object({
+export const productPricingItemZodSchema = z.preprocess((val) => {
+  if (val && typeof val === 'object') {
+    const pId = val.product || val.productId || val.id || val._id;
+    const newPrice = val.updatedSellingPrice !== undefined
+      ? val.updatedSellingPrice
+      : (val.offerBasePrice !== undefined ? val.offerBasePrice : val.price);
+
+    return {
+      ...val,
+      product: pId ? String(pId) : val.product,
+      updatedSellingPrice: newPrice,
+    };
+  }
+  return val;
+}, z.object({
   product: z.string({ required_error: 'Product ID is required' }),
   productName: z.string().optional().default(''),
   barcode: z.string().optional().default(''),
@@ -34,7 +48,7 @@ export const productPricingItemZodSchema = z.object({
   originalSellingPrice: z.coerce.number().min(0).optional().default(0),
   updatedSellingPrice: z.coerce.number().min(0).optional(),
   offerBasePrice: z.coerce.number().min(0).optional(),
-});
+}));
 
 export const createOfferSchema = z.object({
   name: z.string({ required_error: 'Offer name is required' }).trim().min(2, 'Offer name must be at least 2 characters'),
