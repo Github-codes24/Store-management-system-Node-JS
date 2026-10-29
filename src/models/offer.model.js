@@ -1,5 +1,41 @@
 import mongoose from 'mongoose';
 
+const productPricingItemSchema = new mongoose.Schema(
+  {
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'StoreProduct',
+      required: true,
+    },
+    productName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    barcode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mrp: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    originalSellingPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    updatedSellingPrice: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
 const offerSchema = new mongoose.Schema(
   {
     name: {
@@ -42,8 +78,8 @@ const offerSchema = new mongoose.Schema(
     },
     discountType: {
       type: String,
-      enum: ['percentage', 'flat', 'bogo', 'bxgy'],
-      required: [true, 'Discount type (percentage, flat, bogo, or bxgy) is required'],
+      enum: ['percentage', 'flat', 'bogo', 'bxgy', 'special_price'],
+      required: [true, 'Discount type (percentage, flat, bogo, bxgy, or special_price) is required'],
     },
     discountValue: {
       type: Number,
@@ -85,6 +121,7 @@ const offerSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    productPricing: [productPricingItemSchema],
     sendToAllCustomers: {
       type: Boolean,
       default: true,

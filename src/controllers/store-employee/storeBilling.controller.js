@@ -208,14 +208,46 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
-    // Lookup active offer if offerId is provided
+    // Lookup active offer if offerId is provided or auto-detect active promotional pricing
     let appliedOffer = null;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
     if (offerId) {
       try {
         const Offer = (await import('../../models/offer.model.js')).default;
         appliedOffer = await Offer.findOne({ _id: offerId, isDeleted: false, status: 'active' });
+        if (appliedOffer) {
+          if (appliedOffer.validFrom && new Date(appliedOffer.validFrom) > endOfToday) {
+            appliedOffer = null;
+          } else if (appliedOffer.validTo && new Date(appliedOffer.validTo) < startOfToday) {
+            appliedOffer = null;
+          }
+        }
       } catch (e) {
         console.error('Error looking up offerId in billing:', e);
+      }
+    }
+
+    if (!appliedOffer && storeId) {
+      try {
+        const Offer = (await import('../../models/offer.model.js')).default;
+        const itemProdIds = items.map((i) => i.product || i.productId || i._id).filter(Boolean);
+        appliedOffer = await Offer.findOne({
+          status: 'active',
+          isDeleted: false,
+          $or: [{ stores: storeId }, { applyToAllStores: true }],
+          validFrom: { $lte: endOfToday },
+          validTo: { $gte: startOfToday },
+          $or: [
+            { 'productPricing.product': { $in: itemProdIds } },
+            { products: { $in: itemProdIds } },
+            { 'productPricing.0': { $exists: true } },
+          ],
+        }).sort({ createdAt: -1 });
+      } catch (e) {
+        console.error('Error auto-detecting active pricing offer in billing:', e);
       }
     }
 
@@ -249,8 +281,23 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       const qty = Math.floor(rawQty);
 
       const itemMrp = parseFloat(item.mrp !== undefined ? item.mrp : (storeProd.mrp || 0));
-      const unitPrice = parseFloat(item.sellingPrice !== undefined ? item.sellingPrice : (storeProd.offlineSellingPrice || storeProd.onlineSellingPrice || storeProd.mrp || 0));
-      const itemTotal = parseFloat(item.totalAmount !== undefined ? item.totalAmount : (unitPrice * qty));
+      let unitPrice = parseFloat(item.sellingPrice !== undefined ? item.sellingPrice : (storeProd.offlineSellingPrice || storeProd.onlineSellingPrice || storeProd.mrp || 0));
+      let isPromotionalPricing = false;
+
+      // Apply temporary updated selling price from active offer if defined
+      if (appliedOffer && Array.isArray(appliedOffer.productPricing) && appliedOffer.productPricing.length > 0) {
+        const pricingEntry = appliedOffer.productPricing.find(
+          (pp) => String(pp.product) === String(storeProd._id)
+        );
+        if (pricingEntry && pricingEntry.updatedSellingPrice !== undefined && Number(pricingEntry.updatedSellingPrice) > 0) {
+          unitPrice = Number(pricingEntry.updatedSellingPrice);
+          isPromotionalPricing = true;
+        }
+      }
+
+      const itemTotal = isPromotionalPricing
+        ? (unitPrice * qty)
+        : parseFloat(item.totalAmount !== undefined ? item.totalAmount : (unitPrice * qty));
 
       autoComputedGross += (itemMrp * qty);
       autoComputedSubtotal += itemTotal;
@@ -323,7 +370,11 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     let finalDiscountAmount = parseFloat(discountAmount) || 0;
 
     if (appliedOffer) {
-      if (appliedOffer.discountType === 'bogo') {
+      if (appliedOffer.discountType === 'special_price') {
+        finalDiscountType = '₹';
+        finalDiscountValue = 0;
+        finalDiscountAmount = 0;
+      } else if (appliedOffer.discountType === 'bogo') {
         finalDiscountType = 'BOGO';
         const buyProdId = appliedOffer.buyDetails?.buyProduct ? String(appliedOffer.buyDetails.buyProduct) : (appliedOffer.products?.[0] ? String(appliedOffer.products[0]) : null);
         const buyQty = Number(appliedOffer.buyDetails?.buyQuantity || 1);

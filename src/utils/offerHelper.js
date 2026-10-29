@@ -48,6 +48,13 @@ export const enrichOffersWithProducts = async (rawOffers) => {
         if (isValidObjectId(pId)) idSet.add(pId);
       });
     }
+
+    if (Array.isArray(doc.productPricing)) {
+      doc.productPricing.forEach((pp) => {
+        const pId = extractIdString(pp.product);
+        if (isValidObjectId(pId)) idSet.add(pId);
+      });
+    }
   });
 
   const ids = Array.from(idSet);
@@ -176,6 +183,15 @@ export const enrichOffersWithProducts = async (rawOffers) => {
             name: p,
           });
           resolvedProductNames.push(p);
+        }
+      });
+    }
+
+    if (resolvedProductNames.length === 0 && Array.isArray(item.productPricing) && item.productPricing.length > 0) {
+      item.productPricing.forEach((pp) => {
+        const name = pp.productName || (pp.product && lookupMap.get(extractIdString(pp.product))?.productName);
+        if (name && !resolvedProductNames.includes(name)) {
+          resolvedProductNames.push(name);
         }
       });
     }

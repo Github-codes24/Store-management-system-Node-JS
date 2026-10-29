@@ -19,11 +19,22 @@ const normalizeOffersOn = (val) => {
 const normalizeDiscountType = (val) => {
   if (typeof val !== 'string') return val;
   const lower = val.toLowerCase().trim();
+  if (lower.includes('special')) return 'special_price';
   if (lower.includes('bogo')) return 'bogo';
   if (lower.includes('bxgy')) return 'bxgy';
   if (lower.includes('price') || lower.includes('flat') || lower.includes('fixed') || lower === 'rs' || lower === '₹') return 'flat';
   return 'percentage';
 };
+
+export const productPricingItemZodSchema = z.object({
+  product: z.string({ required_error: 'Product ID is required' }),
+  productName: z.string().optional().default(''),
+  barcode: z.string().optional().default(''),
+  mrp: z.coerce.number().min(0).optional().default(0),
+  originalSellingPrice: z.coerce.number().min(0).optional().default(0),
+  updatedSellingPrice: z.coerce.number().min(0).optional(),
+  offerBasePrice: z.coerce.number().min(0).optional(),
+});
 
 export const createOfferSchema = z.object({
   name: z.string({ required_error: 'Offer name is required' }).trim().min(2, 'Offer name must be at least 2 characters'),
@@ -34,7 +45,7 @@ export const createOfferSchema = z.object({
   applyToAllStores: z.boolean().optional().default(true),
   validFrom: z.string({ required_error: 'Valid from date is required' }),
   validTo: z.string({ required_error: 'Valid to / expiry date is required' }),
-  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy'], { required_error: 'Discount type is required' })),
+  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy', 'special_price'], { required_error: 'Discount type is required' })),
   discountValue: z.coerce.number().min(0).optional().default(0),
   buyDetails: z.object({
     buyProduct: z.string().optional().nullable(),
@@ -46,6 +57,7 @@ export const createOfferSchema = z.object({
   }).optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional().default('all'),
   products: z.array(z.string()).optional().default([]),
+  productPricing: z.array(productPricingItemZodSchema).optional().default([]),
   sendToAllCustomers: z.boolean().optional().default(true),
   targetCustomers: z.array(z.string()).optional().default([]),
   status: z.enum(['active', 'inactive']).optional().default('active'),
@@ -60,7 +72,7 @@ export const updateOfferSchema = z.object({
   applyToAllStores: z.boolean().optional(),
   validFrom: z.string().optional(),
   validTo: z.string().optional(),
-  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy'])).optional(),
+  discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy', 'special_price'])).optional(),
   discountValue: z.coerce.number().min(0).optional(),
   buyDetails: z.object({
     buyProduct: z.string().optional().nullable(),
@@ -72,6 +84,7 @@ export const updateOfferSchema = z.object({
   }).optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional(),
   products: z.array(z.string()).optional(),
+  productPricing: z.array(productPricingItemZodSchema).optional(),
   sendToAllCustomers: z.boolean().optional(),
   targetCustomers: z.array(z.string()).optional(),
   status: z.enum(['active', 'inactive']).optional(),

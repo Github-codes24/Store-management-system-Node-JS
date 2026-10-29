@@ -266,4 +266,122 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(singleRes.body.data.offer.getFreeDetails.freeProduct.productName).toBe('Good Day Butter 100g');
     expect(singleRes.body.data.offer.product).toContain('Parle-G Biscuit 200g -> Free: Good Day Butter 100g');
   });
+
+  it('should fetch offer form options with mrp, originalSellingPrice, and barcode', async () => {
+    const testProd = await StoreProduct.create({
+      storeId,
+      barcode: 'DIWALI_BARCODE_001',
+      productName: '150 Panchang Agarbatti',
+      mrp: 100,
+      offlineSellingPrice: 80,
+      onlineSellingPrice: 80,
+      purchasePrice: 60,
+      stockQuantity: 25,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const res = await request(app)
+      .get('/api/store-employee/offers/options')
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(res.status).toBe(200);
+    const prodOption = res.body.data.products.find((p) => p._id.toString() === testProd._id.toString());
+    expect(prodOption).toBeDefined();
+    expect(prodOption.barcode).toBe('DIWALI_BARCODE_001');
+    expect(prodOption.mrp).toBe(100);
+    expect(prodOption.originalSellingPrice).toBe(80);
+    expect(prodOption.sellingPrice).toBe(80);
+  });
+
+  it('should create an offer with temporary updatedSellingPrice when within MRP', async () => {
+    const testProd = await StoreProduct.create({
+      storeId,
+      barcode: 'TEMP_PRICE_001',
+      productName: 'Diwali Special Sweet Box',
+      mrp: 200,
+      offlineSellingPrice: 150,
+      onlineSellingPrice: 150,
+      purchasePrice: 120,
+      stockQuantity: 10,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const res = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Diwali Festive Sweet Offer',
+        validFrom: '2026-10-28',
+        validTo: '2026-11-05',
+        discountType: 'percentage',
+        discountValue: 20,
+        productPricing: [
+          {
+            product: testProd._id.toString(),
+            productName: testProd.productName,
+            mrp: 200,
+            originalSellingPrice: 150,
+            updatedSellingPrice: 180, // Successfully updated from 150 to 180 (within MRP 200)
+          },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.offer.productPricing).toBeDefined();
+    expect(res.body.data.offer.productPricing.length).toBe(1);
+    expect(res.body.data.offer.productPricing[0].updatedSellingPrice).toBe(180);
+    expect(res.body.data.offer.productPricing[0].originalSellingPrice).toBe(150);
+    expect(res.body.data.offer.productPricing[0].mrp).toBe(200);
+  });
+
+  it('should reject offer creation if updatedSellingPrice exceeds product MRP', async () => {
+    const testProd = await StoreProduct.create({
+      storeId,
+      barcode: 'TEMP_PRICE_002',
+      productName: 'Dry Fruit Assorted Pack',
+      mrp: 300,
+      offlineSellingPrice: 240,
+      onlineSellingPrice: 240,
+      purchasePrice: 180,
+      stockQuantity: 15,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const res = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Invalid Price Offer Exceeding MRP',
+        validFrom: '2026-10-28',
+        validTo: '2026-11-05',
+        discountType: 'percentage',
+        discountValue: 10,
+        productPricing: [
+          {
+            product: testProd._id.toString(),
+            productName: testProd.productName,
+            mrp: 300,
+            originalSellingPrice: 240,
+            updatedSellingPrice: 350, // 350 exceeds MRP 300!
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toContain('cannot exceed MRP');
+  });
 });

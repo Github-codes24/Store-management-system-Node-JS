@@ -25,54 +25,85 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
         $or: [{ storeId: employeeStoreId }, { store: employeeStoreId }, { storeId: null }],
         isDeleted: { $ne: true },
       })
-        .select('_id productName barcode batch mrp')
+        .select('_id productName barcode batch mrp offlineSellingPrice onlineSellingPrice stockQuantity')
         .sort({ productName: 1 })
         .lean();
 
       if (storeProducts.length > 0) {
-        productItems = storeProducts.map((p) => ({
-          id: p._id.toString(),
-          _id: p._id.toString(),
-          name: p.productName,
-          productName: p.productName,
-          barcode: p.barcode || '',
-          type: 'store_product',
-        }));
+        productItems = storeProducts.map((p) => {
+          const mrp = Number(p.mrp) || 0;
+          const originalSellingPrice = Number(
+            p.offlineSellingPrice !== undefined && p.offlineSellingPrice !== null
+              ? p.offlineSellingPrice
+              : (p.onlineSellingPrice || p.mrp || 0)
+          );
+          return {
+            id: p._id.toString(),
+            _id: p._id.toString(),
+            name: p.productName,
+            productName: p.productName,
+            barcode: p.barcode || '',
+            mrp,
+            originalSellingPrice,
+            sellingPrice: originalSellingPrice,
+            stockQuantity: Number(p.stockQuantity) || 0,
+            type: 'store_product',
+          };
+        });
       }
     }
 
     if (productItems.length === 0) {
       const allStoreProducts = await StoreProduct.find({ isDeleted: { $ne: true } })
-        .select('_id productName barcode batch mrp')
+        .select('_id productName barcode batch mrp offlineSellingPrice onlineSellingPrice stockQuantity')
         .sort({ productName: 1 })
         .lean();
 
       if (allStoreProducts.length > 0) {
-        productItems = allStoreProducts.map((p) => ({
-          id: p._id.toString(),
-          _id: p._id.toString(),
-          name: p.productName,
-          productName: p.productName,
-          barcode: p.barcode || '',
-          type: 'store_product',
-        }));
+        productItems = allStoreProducts.map((p) => {
+          const mrp = Number(p.mrp) || 0;
+          const originalSellingPrice = Number(
+            p.offlineSellingPrice !== undefined && p.offlineSellingPrice !== null
+              ? p.offlineSellingPrice
+              : (p.onlineSellingPrice || p.mrp || 0)
+          );
+          return {
+            id: p._id.toString(),
+            _id: p._id.toString(),
+            name: p.productName,
+            productName: p.productName,
+            barcode: p.barcode || '',
+            mrp,
+            originalSellingPrice,
+            sellingPrice: originalSellingPrice,
+            stockQuantity: Number(p.stockQuantity) || 0,
+            type: 'store_product',
+          };
+        });
       }
     }
 
     if (productItems.length === 0) {
       const liveProducts = await AdminProduct.find({ isDeleted: false })
-        .select('_id productName barcode')
+        .select('_id productName barcode mrp sellingPrice')
         .sort({ productName: 1 })
         .lean();
 
-      productItems = liveProducts.map((p) => ({
-        id: p._id.toString(),
-        _id: p._id.toString(),
-        name: p.productName || p.name,
-        productName: p.productName || p.name,
-        barcode: p.barcode || '',
-        type: 'product',
-      }));
+      productItems = liveProducts.map((p) => {
+        const mrp = Number(p.mrp) || 0;
+        const originalSellingPrice = Number(p.sellingPrice || p.mrp || 0);
+        return {
+          id: p._id.toString(),
+          _id: p._id.toString(),
+          name: p.productName || p.name,
+          productName: p.productName || p.name,
+          barcode: p.barcode || '',
+          mrp,
+          originalSellingPrice,
+          sellingPrice: originalSellingPrice,
+          type: 'product',
+        };
+      });
     }
 
     // Fetch live categories
@@ -157,6 +188,7 @@ export const createStoreOffer = async (req, res, next) => {
       getFreeDetails,
       appliesTo,
       products,
+      productPricing,
       sendToAllCustomers,
       targetCustomers,
       status,
@@ -173,9 +205,62 @@ export const createStoreOffer = async (req, res, next) => {
       return next(badRequest('Valid To date cannot be earlier than Valid From date'));
     }
 
-    const resolvedAppliesTo = (appliesTo === 'all' && Array.isArray(products) && products.length > 0)
+    // Process and validate productPricing items (check that updatedSellingPrice <= mrp)
+    let validatedProductPricing = [];
+    if (Array.isArray(productPricing) && productPricing.length > 0) {
+      for (const item of productPricing) {
+        const prodId = item.product || item.productId || item.id || item._id;
+        if (!prodId) continue;
+
+        let storeProd = await StoreProduct.findById(prodId).lean();
+        if (!storeProd) {
+          storeProd = await AdminProduct.findById(prodId).lean();
+        }
+
+        const prodName = storeProd?.productName || storeProd?.name || item.productName || 'Product';
+        const realMrp = Number(storeProd?.mrp !== undefined ? storeProd.mrp : (item.mrp || 0));
+        const originalSp = Number(
+          storeProd?.offlineSellingPrice !== undefined && storeProd?.offlineSellingPrice !== null
+            ? storeProd.offlineSellingPrice
+            : (storeProd?.sellingPrice || storeProd?.mrp || item.originalSellingPrice || 0)
+        );
+        const updatedSp = Number(
+          item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice
+        );
+
+        if (isNaN(updatedSp) || updatedSp < 0) {
+          return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
+        }
+
+        // Validation constraint: updatedSellingPrice must not exceed MRP
+        if (realMrp > 0 && updatedSp > realMrp) {
+          return next(
+            badRequest(
+              `Updated selling price (₹${updatedSp}) cannot exceed MRP (₹${realMrp}) for product "${prodName}"`
+            )
+          );
+        }
+
+        validatedProductPricing.push({
+          product: prodId,
+          productName: prodName,
+          barcode: storeProd?.barcode || item.barcode || '',
+          mrp: realMrp,
+          originalSellingPrice: originalSp,
+          updatedSellingPrice: updatedSp,
+        });
+      }
+    }
+
+    let resolvedProducts = Array.isArray(products) ? [...products] : [];
+    if (validatedProductPricing.length > 0) {
+      const pricingIds = validatedProductPricing.map((pp) => pp.product.toString());
+      resolvedProducts = Array.from(new Set([...resolvedProducts, ...pricingIds]));
+    }
+
+    const resolvedAppliesTo = (appliesTo === 'all' && resolvedProducts.length > 0)
       ? 'product'
-      : (appliesTo || (Array.isArray(products) && products.length > 0 ? 'product' : 'all'));
+      : (appliesTo || (resolvedProducts.length > 0 ? 'product' : 'all'));
     const resolvedOfferType = (resolvedAppliesTo === 'product') ? 'special' : (offerType || 'store_wide');
 
     const offer = await Offer.create({
@@ -192,7 +277,8 @@ export const createStoreOffer = async (req, res, next) => {
       buyDetails: buyDetails || { buyProduct: null, buyQuantity: 1 },
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
       appliesTo: resolvedAppliesTo,
-      products: Array.isArray(products) ? products : [],
+      products: resolvedProducts,
+      productPricing: validatedProductPricing,
       sendToAllCustomers: true,
       targetCustomers: [],
       status: status || 'active',
@@ -262,7 +348,9 @@ export const getStoreOffers = async (req, res, next) => {
         : `${off.targetCustomers ? off.targetCustomers.length : 0} Customer`;
 
       let discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
-      if (off.discountType === 'bogo') {
+      if (off.discountType === 'special_price') {
+        discountLabel = 'Special Promotional Price';
+      } else if (off.discountType === 'bogo') {
         discountLabel = `Buy ${off.buyDetails?.buyQuantity || 1} Get ${off.getFreeDetails?.freeQuantity || 1} Free`;
       } else if (off.discountType === 'bxgy') {
         discountLabel = `Buy ${off.buyDetails?.buyQuantity || 1} Get ${off.getFreeDetails?.freeQuantity || 1} Free`;
@@ -285,6 +373,7 @@ export const getStoreOffers = async (req, res, next) => {
         discountLabel,
         product: productLabel,
         products: off.resolvedProducts && off.resolvedProducts.length > 0 ? off.resolvedProducts : off.products,
+        productPricing: off.productPricing || [],
         pushOfferTo,
         sendToAllCustomers: off.sendToAllCustomers,
         targetCustomersCount: off.targetCustomers ? off.targetCustomers.length : 0,
@@ -392,6 +481,62 @@ export const updateStoreOffer = async (req, res, next) => {
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
     if (updateData.products !== undefined) offer.products = updateData.products;
+
+    if (updateData.productPricing !== undefined) {
+      if (Array.isArray(updateData.productPricing)) {
+        let validatedPricing = [];
+        for (const item of updateData.productPricing) {
+          const prodId = item.product || item.productId || item.id || item._id;
+          if (!prodId) continue;
+
+          let storeProd = await StoreProduct.findById(prodId).lean();
+          if (!storeProd) {
+            storeProd = await AdminProduct.findById(prodId).lean();
+          }
+
+          const prodName = storeProd?.productName || storeProd?.name || item.productName || 'Product';
+          const realMrp = Number(storeProd?.mrp !== undefined ? storeProd.mrp : (item.mrp || 0));
+          const originalSp = Number(
+            storeProd?.offlineSellingPrice !== undefined && storeProd?.offlineSellingPrice !== null
+              ? storeProd.offlineSellingPrice
+              : (storeProd?.sellingPrice || storeProd?.mrp || item.originalSellingPrice || 0)
+          );
+          const updatedSp = Number(
+            item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice
+          );
+
+          if (isNaN(updatedSp) || updatedSp < 0) {
+            return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
+          }
+
+          if (realMrp > 0 && updatedSp > realMrp) {
+            return next(
+              badRequest(
+                `Updated selling price (₹${updatedSp}) cannot exceed MRP (₹${realMrp}) for product "${prodName}"`
+              )
+            );
+          }
+
+          validatedPricing.push({
+            product: prodId,
+            productName: prodName,
+            barcode: storeProd?.barcode || item.barcode || '',
+            mrp: realMrp,
+            originalSellingPrice: originalSp,
+            updatedSellingPrice: updatedSp,
+          });
+        }
+
+        offer.productPricing = validatedPricing;
+        if (validatedPricing.length > 0) {
+          const pricingIds = validatedPricing.map((pp) => pp.product.toString());
+          offer.products = Array.from(new Set([...(offer.products || []), ...pricingIds]));
+          offer.appliesTo = 'product';
+          offer.offerType = 'special';
+        }
+      }
+    }
+
     if (updateData.sendToAllCustomers !== undefined) offer.sendToAllCustomers = updateData.sendToAllCustomers;
     if (updateData.targetCustomers !== undefined) offer.targetCustomers = updateData.targetCustomers;
     if (updateData.status !== undefined) offer.status = updateData.status;
@@ -563,6 +708,7 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
         discountTag,
         appliesTo: off.appliesTo,
         products: off.products || [],
+        productPricing: off.productPricing || [],
         sendToAllCustomers: off.sendToAllCustomers,
         validFrom: off.validFrom,
         validTo: off.validTo,

@@ -32,7 +32,7 @@ export const getOfferFormOptions = async (req, res, next) => {
 
     // Fetch live products from AdminProduct collection
     const liveProducts = await AdminProduct.find({ isDeleted: false, status: 'active' })
-      .select('_id productName status')
+      .select('_id productName status barcode mrp sellingPrice')
       .sort({ productName: 1 });
 
     // Fetch live categories from Category collection belonging to active ProductTypes
@@ -41,11 +41,21 @@ export const getOfferFormOptions = async (req, res, next) => {
       .select('_id name')
       .sort({ name: 1 });
 
-    const formattedProducts = liveProducts.map((p) => ({
-      id: p._id.toString(),
-      name: p.productName || p.name,
-      type: 'product',
-    }));
+    const formattedProducts = liveProducts.map((p) => {
+      const mrp = Number(p.mrp) || 0;
+      const originalSellingPrice = Number(p.sellingPrice || p.mrp || 0);
+      return {
+        id: p._id.toString(),
+        _id: p._id.toString(),
+        name: p.productName || p.name,
+        productName: p.productName || p.name,
+        barcode: p.barcode || '',
+        mrp,
+        originalSellingPrice,
+        sellingPrice: originalSellingPrice,
+        type: 'product',
+      };
+    });
 
     const formattedCategories = liveCategories.map((cat) => ({
       id: cat._id.toString(),
@@ -95,6 +105,7 @@ export const createOffer = async (req, res, next) => {
       getFreeDetails,
       appliesTo,
       products,
+      productPricing,
       sendToAllCustomers,
       targetCustomers,
       status,
@@ -111,10 +122,56 @@ export const createOffer = async (req, res, next) => {
       return next(badRequest('Valid To date cannot be earlier than Valid From date'));
     }
 
+    let validatedProductPricing = [];
+    if (Array.isArray(productPricing) && productPricing.length > 0) {
+      for (const item of productPricing) {
+        const prodId = item.product || item.productId || item.id || item._id;
+        if (!prodId) continue;
+
+        let prod = await AdminProduct.findById(prodId).lean();
+        if (!prod) {
+          const StoreProduct = (await import('../../../models/storeProduct.model.js')).default;
+          prod = await StoreProduct.findById(prodId).lean();
+        }
+
+        const prodName = prod?.productName || prod?.name || item.productName || 'Product';
+        const realMrp = Number(prod?.mrp !== undefined ? prod.mrp : (item.mrp || 0));
+        const originalSp = Number(prod?.sellingPrice || prod?.offlineSellingPrice || prod?.mrp || item.originalSellingPrice || 0);
+        const updatedSp = Number(item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice);
+
+        if (isNaN(updatedSp) || updatedSp < 0) {
+          return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
+        }
+
+        if (realMrp > 0 && updatedSp > realMrp) {
+          return next(
+            badRequest(
+              `Updated selling price (₹${updatedSp}) cannot exceed MRP (₹${realMrp}) for product "${prodName}"`
+            )
+          );
+        }
+
+        validatedProductPricing.push({
+          product: prodId,
+          productName: prodName,
+          barcode: prod?.barcode || item.barcode || '',
+          mrp: realMrp,
+          originalSellingPrice: originalSp,
+          updatedSellingPrice: updatedSp,
+        });
+      }
+    }
+
+    let resolvedProducts = Array.isArray(products) ? [...products] : [];
+    if (validatedProductPricing.length > 0) {
+      const pricingIds = validatedProductPricing.map((pp) => pp.product.toString());
+      resolvedProducts = Array.from(new Set([...resolvedProducts, ...pricingIds]));
+    }
+
     const offer = await Offer.create({
       name: name.trim(),
       description: description ? description.trim() : '',
-      offerType: offerType || 'store_wide',
+      offerType: (resolvedProducts.length > 0 || validatedProductPricing.length > 0) ? 'special' : (offerType || 'store_wide'),
       offersOn: offersOn || 'both',
       stores: Array.isArray(stores) ? stores : [],
       applyToAllStores: applyToAllStores !== undefined ? applyToAllStores : !stores || stores.length === 0,
@@ -124,8 +181,9 @@ export const createOffer = async (req, res, next) => {
       discountValue: Number(discountValue || 0),
       buyDetails: buyDetails || { buyProduct: null, buyQuantity: 1 },
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
-      appliesTo: appliesTo || 'all',
-      products: Array.isArray(products) ? products : [],
+      appliesTo: (resolvedProducts.length > 0 || validatedProductPricing.length > 0) ? 'product' : (appliesTo || 'all'),
+      products: resolvedProducts,
+      productPricing: validatedProductPricing,
       sendToAllCustomers: true,
       targetCustomers: [],
       status: status || 'active',
@@ -318,6 +376,57 @@ export const updateOffer = async (req, res, next) => {
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
     if (updateData.products !== undefined) offer.products = updateData.products;
+
+    if (updateData.productPricing !== undefined) {
+      if (Array.isArray(updateData.productPricing)) {
+        let validatedPricing = [];
+        for (const item of updateData.productPricing) {
+          const prodId = item.product || item.productId || item.id || item._id;
+          if (!prodId) continue;
+
+          let prod = await AdminProduct.findById(prodId).lean();
+          if (!prod) {
+            const StoreProduct = (await import('../../../models/storeProduct.model.js')).default;
+            prod = await StoreProduct.findById(prodId).lean();
+          }
+
+          const prodName = prod?.productName || prod?.name || item.productName || 'Product';
+          const realMrp = Number(prod?.mrp !== undefined ? prod.mrp : (item.mrp || 0));
+          const originalSp = Number(prod?.sellingPrice || prod?.offlineSellingPrice || prod?.mrp || item.originalSellingPrice || 0);
+          const updatedSp = Number(item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice);
+
+          if (isNaN(updatedSp) || updatedSp < 0) {
+            return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
+          }
+
+          if (realMrp > 0 && updatedSp > realMrp) {
+            return next(
+              badRequest(
+                `Updated selling price (₹${updatedSp}) cannot exceed MRP (₹${realMrp}) for product "${prodName}"`
+              )
+            );
+          }
+
+          validatedPricing.push({
+            product: prodId,
+            productName: prodName,
+            barcode: prod?.barcode || item.barcode || '',
+            mrp: realMrp,
+            originalSellingPrice: originalSp,
+            updatedSellingPrice: updatedSp,
+          });
+        }
+
+        offer.productPricing = validatedPricing;
+        if (validatedPricing.length > 0) {
+          const pricingIds = validatedPricing.map((pp) => pp.product.toString());
+          offer.products = Array.from(new Set([...(offer.products || []), ...pricingIds]));
+          offer.appliesTo = 'product';
+          offer.offerType = 'special';
+        }
+      }
+    }
+
     if (updateData.sendToAllCustomers !== undefined) offer.sendToAllCustomers = updateData.sendToAllCustomers;
     if (updateData.targetCustomers !== undefined) offer.targetCustomers = updateData.targetCustomers;
     if (updateData.status !== undefined) offer.status = updateData.status;
