@@ -225,3 +225,54 @@ export const enrichOffersWithProducts = async (rawOffers) => {
 
   return isArray ? enriched : enriched[0];
 };
+
+/**
+ * Returns a Map of productId -> promotional pricing metadata for all active offers
+ * matching the given storeId and current validity window.
+ */
+export const getActiveProductPricingMap = async (storeId = null) => {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+  const pricingMap = new Map();
+
+  try {
+    const Offer = (await import('../models/offer.model.js')).default;
+    const storeFilter = storeId
+      ? { $or: [{ stores: storeId }, { applyToAllStores: true }] }
+      : {};
+
+    const activeOffers = await Offer.find({
+      status: 'active',
+      isDeleted: false,
+      validFrom: { $lte: endOfToday },
+      validTo: { $gte: startOfToday },
+      'productPricing.0': { $exists: true },
+      ...storeFilter,
+    }).sort({ createdAt: -1 }).lean();
+
+    for (const off of activeOffers) {
+      if (Array.isArray(off.productPricing)) {
+        for (const pp of off.productPricing) {
+          const pId = extractIdString(pp.product);
+          if (pId && !pricingMap.has(pId) && pp.updatedSellingPrice !== undefined && Number(pp.updatedSellingPrice) > 0) {
+            pricingMap.set(pId, {
+              updatedSellingPrice: Number(pp.updatedSellingPrice),
+              originalSellingPrice: Number(pp.originalSellingPrice) || undefined,
+              mrp: Number(pp.mrp) || undefined,
+              offerId: off._id,
+              offerName: off.name,
+              discountType: off.discountType,
+              discountValue: off.discountValue,
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error in getActiveProductPricingMap:', err);
+  }
+
+  return pricingMap;
+};

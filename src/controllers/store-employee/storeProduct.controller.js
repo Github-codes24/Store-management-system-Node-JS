@@ -14,6 +14,7 @@ import { processUploadedFile } from '../../utils/file-upload.js';
 import { parseFlexibleDate } from '../../utils/date.util.js';
 import { parseExpiryAlertDays } from '../../utils/expiryAlert.util.js';
 import { buildExpiringAndLowStockPipeline } from '../../utils/productStockSort.util.js';
+import { getActiveProductPricingMap } from '../../utils/offerHelper.js';
 import ExcelJS from 'exceljs';
 
 /**
@@ -197,10 +198,16 @@ export const getStoreProducts = async (req, res, next) => {
     const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
     const products = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
+    const activePricingMap = await getActiveProductPricingMap(storeId);
+
     const stockItems = products.map((product, index) => {
       const { statusText, statusCode } = computeStockStatus(product);
       const unitShortName = product.unit?.shortName || product.unit?.name || 'pc';
       const brandName = product.brand?.name || '—';
+      const promoInfo = activePricingMap.get(String(product._id));
+      const effectiveOfflineSellingPrice = (promoInfo && promoInfo.updatedSellingPrice !== undefined)
+        ? promoInfo.updatedSellingPrice
+        : product.offlineSellingPrice;
 
       return {
         _id: product._id,
@@ -224,7 +231,10 @@ export const getStoreProducts = async (req, res, next) => {
         piece: product.piece,
         mrp: product.mrp,
         onlineSellingPrice: product.onlineSellingPrice,
-        offlineSellingPrice: product.offlineSellingPrice,
+        offlineSellingPrice: effectiveOfflineSellingPrice,
+        originalOfflineSellingPrice: product.offlineSellingPrice,
+        hasOffer: Boolean(promoInfo),
+        offerName: promoInfo ? promoInfo.offerName : undefined,
         purchasePrice: product.purchasePrice,
         stockQuantity: product.stockQuantity,
         stockDisplay: `${product.stockQuantity} ${unitShortName}`,
@@ -281,6 +291,16 @@ export const getStoreProductById = async (req, res, next) => {
 
     const { statusText, statusCode } = computeStockStatus(product);
     const unitShortName = product.unit?.shortName || product.unit?.name || 'pc';
+
+    const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
+    const activePricingMap = await getActiveProductPricingMap(storeId);
+    const promoInfo = activePricingMap.get(String(product._id));
+    if (promoInfo && promoInfo.updatedSellingPrice !== undefined) {
+      product.originalOfflineSellingPrice = product.offlineSellingPrice;
+      product.offlineSellingPrice = promoInfo.updatedSellingPrice;
+      product.hasOffer = true;
+      product.offerName = promoInfo.offerName;
+    }
 
     return res.status(200).json(
       successResponse({
@@ -1137,12 +1157,22 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
       );
     }
 
+    const activePricingMap = await getActiveProductPricingMap(storeId);
+    const promoInfo = activePricingMap.get(String(product._id));
+    let productData = product.toObject ? product.toObject() : product;
+    if (promoInfo && promoInfo.updatedSellingPrice !== undefined) {
+      productData.originalOfflineSellingPrice = productData.offlineSellingPrice;
+      productData.offlineSellingPrice = promoInfo.updatedSellingPrice;
+      productData.hasOffer = true;
+      productData.offerName = promoInfo.offerName;
+    }
+
     return res.status(200).json(
       successResponse({
         message: 'Product retrieved successfully by barcode',
         data: {
           exists: true,
-          product,
+          product: productData,
         },
       })
     );

@@ -384,4 +384,123 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(res.body.success).toBe(false);
     expect(res.body.message).toContain('cannot exceed MRP');
   });
+
+  it('should reflect updatedSellingPrice in GET /api/store-employee/products during active offer period', async () => {
+    const testProd = await StoreProduct.create({
+      storeId,
+      barcode: 'PROD_CATALOG_TEST_001',
+      productName: 'Dynamic Pricing Catalog Test Product',
+      mrp: 120,
+      offlineSellingPrice: 100,
+      onlineSellingPrice: 100,
+      purchasePrice: 70,
+      stockQuantity: 50,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    // 1. Before offer, product list should show offlineSellingPrice = 100
+    const beforeRes = await request(app)
+      .get('/api/store-employee/products')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .query({ search: 'PROD_CATALOG_TEST_001' });
+
+    expect(beforeRes.status).toBe(200);
+    const prodBefore = beforeRes.body.data.find((p) => p.barcode === 'PROD_CATALOG_TEST_001');
+    expect(prodBefore).toBeDefined();
+    expect(prodBefore.offlineSellingPrice).toBe(100);
+
+    // 2. Create active offer with updatedSellingPrice = 50
+    const today = new Date().toISOString().split('T')[0];
+    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const offerRes = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Festive Flash 50 Price Offer',
+        validFrom: today,
+        validTo: nextWeek,
+        discountType: 'percentage',
+        discountValue: 10,
+        productPricing: [
+          {
+            product: testProd._id.toString(),
+            productName: testProd.productName,
+            mrp: 120,
+            originalSellingPrice: 100,
+            updatedSellingPrice: 50,
+          },
+        ],
+      });
+
+    expect(offerRes.status).toBe(201);
+    const createdOfferId = offerRes.body.data.offer._id;
+
+    // 3. During active offer, product list should dynamically return offlineSellingPrice = 50
+    const duringRes = await request(app)
+      .get('/api/store-employee/products')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .query({ search: 'PROD_CATALOG_TEST_001' });
+
+    expect(duringRes.status).toBe(200);
+    const prodDuring = duringRes.body.data.find((p) => p.barcode === 'PROD_CATALOG_TEST_001');
+    expect(prodDuring).toBeDefined();
+    expect(prodDuring.offlineSellingPrice).toBe(50);
+    expect(prodDuring.originalOfflineSellingPrice).toBe(100);
+    expect(prodDuring.hasOffer).toBe(true);
+
+    // 4. During billing, bill item should use 50, and Net Payable should be 45 (50 - 10% = 45)
+    // even if client sends stale subtotal = 100 and savings = 20
+    const billRes = await request(app)
+      .post('/api/store-employee/billing/bills')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        saleType: 'Offline',
+        items: [
+          {
+            product: testProd._id.toString(),
+            productName: testProd.productName,
+            barcode: testProd.barcode,
+            quantity: 1,
+            mrp: 120,
+            sellingPrice: 100, // Client sent old selling price
+          },
+        ],
+        subtotal: 100, // Client draft subtotal
+        savings: 20, // Client draft savings
+        offerId: createdOfferId,
+        paymentMethod: 'Cash',
+        paidAmount: 50,
+      });
+
+    expect(billRes.status).toBe(201);
+    const createdBill = billRes.body.data.bill || billRes.body.data.order.bills[0];
+    expect(createdBill.items[0].sellingPrice).toBe(50);
+    expect(createdBill.subtotal).toBe(50);
+    expect(createdBill.discountAmount).toBe(5);
+    expect(createdBill.netAmount).toBe(45);
+
+    // 5. When offer is deactivated, product list should immediately revert back to 100
+    const toggleRes = await request(app)
+      .patch(`/api/store-employee/offers/${createdOfferId}/status`)
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({ status: 'inactive' });
+
+    expect(toggleRes.status).toBe(200);
+
+    const afterDeactivateRes = await request(app)
+      .get('/api/store-employee/products')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .query({ search: 'PROD_CATALOG_TEST_001' });
+
+    expect(afterDeactivateRes.status).toBe(200);
+    const prodAfter = afterDeactivateRes.body.data.find((p) => p.barcode === 'PROD_CATALOG_TEST_001');
+    expect(prodAfter).toBeDefined();
+    expect(prodAfter.offlineSellingPrice).toBe(100);
+    expect(prodAfter.hasOffer).toBe(false);
+  });
 });

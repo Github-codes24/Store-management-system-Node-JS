@@ -237,13 +237,17 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         appliedOffer = await Offer.findOne({
           status: 'active',
           isDeleted: false,
-          $or: [{ stores: storeId }, { applyToAllStores: true }],
           validFrom: { $lte: endOfToday },
           validTo: { $gte: startOfToday },
-          $or: [
-            { 'productPricing.product': { $in: itemProdIds } },
-            { products: { $in: itemProdIds } },
-            { 'productPricing.0': { $exists: true } },
+          $and: [
+            { $or: [{ stores: storeId }, { applyToAllStores: true }] },
+            {
+              $or: [
+                { 'productPricing.product': { $in: itemProdIds } },
+                { products: { $in: itemProdIds } },
+                { 'productPricing.0': { $exists: true } },
+              ],
+            },
           ],
         }).sort({ createdAt: -1 });
       } catch (e) {
@@ -362,8 +366,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     }
 
     // Auto calculate Gross, Subtotal, Discount & Net Amount if not provided
-    const finalGrossAmount = (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : autoComputedGross;
-    const finalSubtotal = (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : autoComputedSubtotal;
+    const finalGrossAmount = (grossAmount && Number(grossAmount) > 0 && !appliedOffer) ? parseFloat(grossAmount) : autoComputedGross;
+    const finalSubtotal = (subtotal && Number(subtotal) > 0 && !appliedOffer) ? parseFloat(subtotal) : autoComputedSubtotal;
 
     let finalDiscountType = discountType;
     let finalDiscountValue = parseFloat(discountValue) || 0;
@@ -522,9 +526,9 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       const existingBill = order.bills[existingBillIndex];
       existingBill.items = processedItems;
       existingBill.totalItems = processedItems.reduce((sum, it) => sum + it.quantity, 0);
-      existingBill.grossAmount = (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : finalGrossAmount;
-      existingBill.savings = (savings && Number(savings) > 0) ? parseFloat(savings) : finalSavings;
-      existingBill.subtotal = (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : finalSubtotal;
+      existingBill.grossAmount = finalGrossAmount;
+      existingBill.savings = finalSavings;
+      existingBill.subtotal = finalSubtotal;
       existingBill.gstTotal = parseFloat(gstTotal) || 0;
       existingBill.discountType = finalDiscountType;
       existingBill.discountValue = finalDiscountValue;
@@ -584,9 +588,9 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       billDate: new Date(),
       items: processedItems,
       totalItems: processedItems.reduce((sum, it) => sum + it.quantity, 0),
-      grossAmount: (grossAmount && Number(grossAmount) > 0) ? parseFloat(grossAmount) : finalGrossAmount,
-      savings: (savings && Number(savings) > 0) ? parseFloat(savings) : finalSavings,
-      subtotal: (subtotal && Number(subtotal) > 0) ? parseFloat(subtotal) : finalSubtotal,
+      grossAmount: finalGrossAmount,
+      savings: finalSavings,
+      subtotal: finalSubtotal,
       gstTotal: parseFloat(gstTotal) || 0,
       discountType: finalDiscountType,
       discountValue: finalDiscountValue,
