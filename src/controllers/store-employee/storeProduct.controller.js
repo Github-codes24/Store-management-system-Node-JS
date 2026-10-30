@@ -202,7 +202,8 @@ export const getStoreProducts = async (req, res, next) => {
     const isBillingPage = Boolean(
       (referer && referer.includes('/billing')) ||
       req.query.source === 'billing' ||
-      req.query.forBilling === 'true'
+      req.query.forBilling === 'true' ||
+      ((Number(req.query.limit) === 30 || Number(req.query.limit) === 100) && req.query.page === undefined)
     );
 
     const activePricingMap = await getActiveProductPricingMap(storeId);
@@ -323,7 +324,8 @@ export const getStoreProductById = async (req, res, next) => {
     const isBillingPage = Boolean(
       (referer && referer.includes('/billing')) ||
       req.query.source === 'billing' ||
-      req.query.forBilling === 'true'
+      req.query.forBilling === 'true' ||
+      !referer.includes('/inventory')
     );
 
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
