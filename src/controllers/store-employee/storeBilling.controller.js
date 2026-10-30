@@ -7,6 +7,7 @@ import { createCustomerNotificationHelper } from '../customer/customerNotificati
 import { syncCustomerMetricsInDb, isWalkInCustomer } from '../../utils/customerMetrics.util.js';
 import razorpayInstance from '../../config/razorpay.js';
 import env from '../../config/env.js';
+import { getActiveProductPricingMap } from '../../utils/offerHelper.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online).
@@ -251,11 +252,13 @@ export const createOrAppendOrderBill = async (req, res, next) => {
               ],
             },
           ],
-        }).sort({ createdAt: -1 });
+        }).sort({ updatedAt: -1, createdAt: -1 });
       } catch (e) {
         console.error('Error auto-detecting active pricing offer in billing:', e);
       }
     }
+
+    const activePricingMap = await getActiveProductPricingMap(storeId);
 
     // Verify products and deduct stock from selected batch
     const processedItems = [];
@@ -290,15 +293,33 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       let unitPrice = parseFloat(item.sellingPrice !== undefined ? item.sellingPrice : (storeProd.offlineSellingPrice || storeProd.onlineSellingPrice || storeProd.mrp || 0));
       let isPromotionalPricing = false;
 
-      // Apply temporary updated selling price from active offer if defined
-      if (appliedOffer && Array.isArray(appliedOffer.productPricing) && appliedOffer.productPricing.length > 0) {
-        const pricingEntry = appliedOffer.productPricing.find(
-          (pp) => String(pp.product) === String(storeProd._id)
-        );
-        if (pricingEntry && pricingEntry.updatedSellingPrice !== undefined && Number(pricingEntry.updatedSellingPrice) > 0) {
-          unitPrice = Number(pricingEntry.updatedSellingPrice);
-          isPromotionalPricing = true;
+      // Apply promotional selling price from active offer or applied offer if defined
+      let promoPrice = null;
+      if (appliedOffer) {
+        if (Array.isArray(appliedOffer.productPricing) && appliedOffer.productPricing.length > 0) {
+          const pricingEntry = appliedOffer.productPricing.find(
+            (pp) => String(pp.product) === String(storeProd._id)
+          );
+          if (pricingEntry) {
+            const ep = pricingEntry.updatedSellingPrice ?? pricingEntry.offerPrice ?? pricingEntry.sellingPrice;
+            if (ep !== undefined && Number(ep) > 0) promoPrice = Number(ep);
+          }
         }
+        if (!promoPrice && appliedOffer.buyDetails && String(appliedOffer.buyDetails.buyProduct) === String(storeProd._id)) {
+          const bp = appliedOffer.buyDetails.updatedSellingPrice ?? appliedOffer.buyDetails.offerPrice ?? appliedOffer.buyDetails.sellingPrice;
+          if (bp !== undefined && Number(bp) > 0) promoPrice = Number(bp);
+        }
+      }
+      if (!promoPrice && activePricingMap && activePricingMap.has(String(storeProd._id))) {
+        const ap = activePricingMap.get(String(storeProd._id));
+        if (ap && ap.updatedSellingPrice > 0) {
+          promoPrice = Number(ap.updatedSellingPrice);
+        }
+      }
+
+      if (promoPrice !== null) {
+        unitPrice = promoPrice;
+        isPromotionalPricing = true;
       }
 
       const itemTotal = isPromotionalPricing

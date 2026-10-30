@@ -396,17 +396,21 @@ export const getActiveProductPricingMap = async (storeId = null) => {
       isDeleted: false,
       validFrom: { $lte: endOfToday },
       validTo: { $gte: startOfToday },
-      'productPricing.0': { $exists: true },
       ...storeFilter,
-    }).sort({ createdAt: -1 }).lean();
+    }).sort({ updatedAt: -1 }).lean();
 
     for (const off of activeOffers) {
       if (Array.isArray(off.productPricing)) {
         for (const pp of off.productPricing) {
           const pId = extractIdString(pp.product);
-          if (pId && !pricingMap.has(pId) && pp.updatedSellingPrice !== undefined && Number(pp.updatedSellingPrice) > 0) {
+          const pPrice = pp.updatedSellingPrice !== undefined
+            ? pp.updatedSellingPrice
+            : (pp.offerBasePrice !== undefined
+                ? pp.offerBasePrice
+                : (pp.price !== undefined ? pp.price : (pp.offerPrice !== undefined ? pp.offerPrice : pp.sellingPrice)));
+          if (pId && !pricingMap.has(pId) && pPrice !== undefined && Number(pPrice) > 0) {
             pricingMap.set(pId, {
-              updatedSellingPrice: Number(pp.updatedSellingPrice),
+              updatedSellingPrice: Number(pPrice),
               originalSellingPrice: Number(pp.originalSellingPrice) || undefined,
               mrp: Number(pp.mrp) || undefined,
               offerId: off._id,
@@ -415,6 +419,42 @@ export const getActiveProductPricingMap = async (storeId = null) => {
               discountValue: off.discountValue,
             });
           }
+        }
+      }
+
+      if (off.buyDetails && off.buyDetails.buyProduct) {
+        const bId = extractIdString(off.buyDetails.buyProduct);
+        const bPrice = off.buyDetails.updatedSellingPrice !== undefined
+          ? off.buyDetails.updatedSellingPrice
+          : (off.buyDetails.offerBasePrice !== undefined
+              ? off.buyDetails.offerBasePrice
+              : (off.buyDetails.sellingPrice !== undefined ? off.buyDetails.sellingPrice : (off.buyDetails.offerPrice !== undefined ? off.buyDetails.offerPrice : off.buyDetails.price)));
+        if (bId && !pricingMap.has(bId) && bPrice !== undefined && Number(bPrice) > 0) {
+          pricingMap.set(bId, {
+            updatedSellingPrice: Number(bPrice),
+            offerId: off._id,
+            offerName: off.name,
+            discountType: off.discountType,
+            discountValue: off.discountValue,
+          });
+        }
+      }
+
+      if (off.getFreeDetails && off.getFreeDetails.freeProduct) {
+        const fId = extractIdString(off.getFreeDetails.freeProduct);
+        const fPrice = off.getFreeDetails.updatedSellingPrice !== undefined
+          ? off.getFreeDetails.updatedSellingPrice
+          : (off.getFreeDetails.offerBasePrice !== undefined
+              ? off.getFreeDetails.offerBasePrice
+              : (off.getFreeDetails.sellingPrice !== undefined ? off.getFreeDetails.sellingPrice : (off.getFreeDetails.offerPrice !== undefined ? off.getFreeDetails.offerPrice : off.getFreeDetails.price)));
+        if (fId && !pricingMap.has(fId) && fPrice !== undefined && Number(fPrice) > 0) {
+          pricingMap.set(fId, {
+            updatedSellingPrice: Number(fPrice),
+            offerId: off._id,
+            offerName: off.name,
+            discountType: off.discountType,
+            discountValue: off.discountValue,
+          });
         }
       }
     }

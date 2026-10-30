@@ -198,6 +198,13 @@ export const getStoreProducts = async (req, res, next) => {
     const docMap = new Map(docs.map((d) => [d._id.toString(), d]));
     const products = idList.map((id) => docMap.get(id.toString())).filter(Boolean);
 
+    const referer = req.headers?.referer || req.headers?.referrer || '';
+    const isBillingPage = Boolean(
+      (referer && referer.includes('/billing')) ||
+      req.query.source === 'billing' ||
+      req.query.forBilling === 'true'
+    );
+
     const activePricingMap = await getActiveProductPricingMap(storeId);
 
     const stockItems = products.map((product, index) => {
@@ -205,8 +212,10 @@ export const getStoreProducts = async (req, res, next) => {
       const unitShortName = product.unit?.shortName || product.unit?.name || 'pc';
       const brandName = product.brand?.name || '—';
       const promoInfo = activePricingMap.get(String(product._id));
-      const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
-      const promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
+      const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined && Number(promoInfo.updatedSellingPrice) > 0);
+      const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
+      const effectiveOfflineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.offlineSellingPrice;
+      const effectiveOnlineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.onlineSellingPrice;
 
       return {
         _id: product._id,
@@ -223,14 +232,25 @@ export const getStoreProducts = async (req, res, next) => {
         batchType: product.batchType,
         batch: product.batch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : ''),
         batches: Array.isArray(product.batches)
-          ? product.batches.filter((b) => (Number(b.stockQuantity) || 0) > 0)
+          ? product.batches
+              .filter((b) => (Number(b.stockQuantity) || 0) > 0)
+              .map((b) => ({
+                ...b,
+                originalSellingPrice: b.offlineSellingPrice || product.offlineSellingPrice,
+                offlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.offlineSellingPrice || product.offlineSellingPrice),
+                onlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.onlineSellingPrice || product.onlineSellingPrice),
+                sellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.offlineSellingPrice || product.offlineSellingPrice),
+              }))
           : [],
         unit: product.unit,
         unitShortName,
         piece: product.piece,
         mrp: product.mrp,
-        onlineSellingPrice: product.onlineSellingPrice,
-        offlineSellingPrice: product.offlineSellingPrice,
+        onlineSellingPrice: effectiveOnlineSp,
+        offlineSellingPrice: effectiveOfflineSp,
+        sellingPrice: effectiveOfflineSp,
+        originalSellingPrice: product.offlineSellingPrice,
+        catalogSellingPrice: product.offlineSellingPrice,
         promotionalSellingPrice,
         hasActiveOffer: hasOffer,
         activeOffer: hasOffer
@@ -299,11 +319,19 @@ export const getStoreProductById = async (req, res, next) => {
     const { statusText, statusCode } = computeStockStatus(product);
     const unitShortName = product.unit?.shortName || product.unit?.name || 'pc';
 
+    const referer = req.headers?.referer || req.headers?.referrer || '';
+    const isBillingPage = Boolean(
+      (referer && referer.includes('/billing')) ||
+      req.query.source === 'billing' ||
+      req.query.forBilling === 'true'
+    );
+
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
     const activePricingMap = await getActiveProductPricingMap(storeId);
     const promoInfo = activePricingMap.get(String(product._id));
-    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
-    product.promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
+    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined && Number(promoInfo.updatedSellingPrice) > 0);
+    const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
+    product.promotionalSellingPrice = promotionalSellingPrice;
     product.hasActiveOffer = hasOffer;
     product.activeOffer = hasOffer
       ? {
@@ -314,6 +342,21 @@ export const getStoreProductById = async (req, res, next) => {
           discountValue: promoInfo.discountValue,
         }
       : null;
+
+    if (isBillingPage && hasOffer && promotionalSellingPrice > 0) {
+      product.originalSellingPrice = product.offlineSellingPrice;
+      product.catalogSellingPrice = product.offlineSellingPrice;
+      product.offlineSellingPrice = promotionalSellingPrice;
+      product.sellingPrice = promotionalSellingPrice;
+      if (Array.isArray(product.batches)) {
+        product.batches = product.batches.map((b) => ({
+          ...b,
+          originalSellingPrice: b.offlineSellingPrice || product.originalSellingPrice,
+          offlineSellingPrice: promotionalSellingPrice,
+          sellingPrice: promotionalSellingPrice,
+        }));
+      }
+    }
 
     return res.status(200).json(
       successResponse({
@@ -1172,9 +1215,10 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
 
     const activePricingMap = await getActiveProductPricingMap(storeId);
     const promoInfo = activePricingMap.get(String(product._id));
-    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined);
+    const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined && Number(promoInfo.updatedSellingPrice) > 0);
     let productData = product.toObject ? product.toObject() : product;
-    productData.promotionalSellingPrice = hasOffer ? promoInfo.updatedSellingPrice : null;
+    const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
+    productData.promotionalSellingPrice = promotionalSellingPrice;
     productData.hasActiveOffer = hasOffer;
     productData.activeOffer = hasOffer
       ? {
@@ -1185,6 +1229,21 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
           discountValue: promoInfo.discountValue,
         }
       : null;
+
+    if (hasOffer && promotionalSellingPrice > 0) {
+      productData.originalSellingPrice = productData.offlineSellingPrice;
+      productData.catalogSellingPrice = productData.offlineSellingPrice;
+      productData.offlineSellingPrice = promotionalSellingPrice;
+      productData.sellingPrice = promotionalSellingPrice;
+      if (Array.isArray(productData.batches)) {
+        productData.batches = productData.batches.map((b) => ({
+          ...b,
+          originalSellingPrice: b.offlineSellingPrice || productData.originalSellingPrice,
+          offlineSellingPrice: promotionalSellingPrice,
+          sellingPrice: promotionalSellingPrice,
+        }));
+      }
+    }
 
     return res.status(200).json(
       successResponse({
