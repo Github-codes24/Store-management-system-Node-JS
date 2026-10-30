@@ -241,16 +241,20 @@ export const getStoreProducts = async (req, res, next) => {
         batches: Array.isArray(product.batches)
           ? product.batches
               .filter((b) => (Number(b.stockQuantity) || 0) > 0)
-              .map((b) => ({
-                ...b,
-                batchNumber: (isBillingPage && hasOffer && offerTag)
-                  ? `${b.batchNumber} ${offerTag}`
-                  : b.batchNumber,
-                originalSellingPrice: b.offlineSellingPrice || product.offlineSellingPrice,
-                offlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.offlineSellingPrice || product.offlineSellingPrice),
-                onlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.onlineSellingPrice || product.onlineSellingPrice),
-                sellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.offlineSellingPrice || product.offlineSellingPrice),
-              }))
+              .map((b) => {
+                const bObj = b.toObject ? b.toObject() : b;
+                return {
+                  ...bObj,
+                  stockQuantity: Number(bObj.stockQuantity) || 0,
+                  batchNumber: (isBillingPage && hasOffer && offerTag)
+                    ? `${bObj.batchNumber} ${offerTag}`
+                    : bObj.batchNumber,
+                  originalSellingPrice: bObj.offlineSellingPrice || product.offlineSellingPrice,
+                  offlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (bObj.offlineSellingPrice || product.offlineSellingPrice),
+                  onlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (bObj.onlineSellingPrice || product.onlineSellingPrice),
+                  sellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (bObj.offlineSellingPrice || product.offlineSellingPrice),
+                };
+              })
           : [],
         unit: product.unit,
         unitShortName,
@@ -364,13 +368,17 @@ export const getStoreProductById = async (req, res, next) => {
       product.offlineSellingPrice = promotionalSellingPrice;
       product.sellingPrice = promotionalSellingPrice;
       if (Array.isArray(product.batches)) {
-        product.batches = product.batches.map((b) => ({
-          ...b,
-          batchNumber: offerTag ? `${b.batchNumber} ${offerTag}` : b.batchNumber,
-          originalSellingPrice: b.offlineSellingPrice || product.originalSellingPrice,
-          offlineSellingPrice: promotionalSellingPrice,
-          sellingPrice: promotionalSellingPrice,
-        }));
+        product.batches = product.batches.map((b) => {
+          const bObj = b.toObject ? b.toObject() : b;
+          return {
+            ...bObj,
+            stockQuantity: Number(bObj.stockQuantity) || 0,
+            batchNumber: offerTag ? `${bObj.batchNumber} ${offerTag}` : bObj.batchNumber,
+            originalSellingPrice: bObj.offlineSellingPrice || product.originalSellingPrice,
+            offlineSellingPrice: promotionalSellingPrice,
+            sellingPrice: promotionalSellingPrice,
+          };
+        });
       }
     }
 
@@ -1256,13 +1264,17 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
       productData.offlineSellingPrice = promotionalSellingPrice;
       productData.sellingPrice = promotionalSellingPrice;
       if (Array.isArray(productData.batches)) {
-        productData.batches = productData.batches.map((b) => ({
-          ...b,
-          batchNumber: offerTag ? `${b.batchNumber} ${offerTag}` : b.batchNumber,
-          originalSellingPrice: b.offlineSellingPrice || productData.originalSellingPrice,
-          offlineSellingPrice: promotionalSellingPrice,
-          sellingPrice: promotionalSellingPrice,
-        }));
+        productData.batches = productData.batches.map((b) => {
+          const bObj = b.toObject ? b.toObject() : b;
+          return {
+            ...bObj,
+            stockQuantity: Number(bObj.stockQuantity) || 0,
+            batchNumber: offerTag ? `${bObj.batchNumber} ${offerTag}` : bObj.batchNumber,
+            originalSellingPrice: bObj.offlineSellingPrice || productData.originalSellingPrice,
+            offlineSellingPrice: promotionalSellingPrice,
+            sellingPrice: promotionalSellingPrice,
+          };
+        });
       }
     }
 
