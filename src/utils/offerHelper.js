@@ -180,7 +180,21 @@ export const enrichOffersWithProducts = async (rawOffers) => {
         price: updatedSellingPrice,
         offerBasePrice: updatedSellingPrice,
         promotionalSellingPrice: updatedSellingPrice,
+        offerPrice: updatedSellingPrice,
+        offerSellingPrice: updatedSellingPrice,
+        offerSP: updatedSellingPrice,
+        specialPrice: updatedSellingPrice,
       };
+
+      item.buyDetails.updatedSellingPrice = updatedSellingPrice;
+      item.buyDetails.sellingPrice = updatedSellingPrice;
+      item.buyDetails.price = updatedSellingPrice;
+      item.buyDetails.offerBasePrice = updatedSellingPrice;
+      item.buyDetails.promotionalSellingPrice = updatedSellingPrice;
+      item.buyDetails.offerPrice = updatedSellingPrice;
+      item.buyDetails.offerSellingPrice = updatedSellingPrice;
+      item.buyDetails.offerSP = updatedSellingPrice;
+      item.buyDetails.specialPrice = updatedSellingPrice;
     }
 
     // Resolve freeProduct
@@ -218,7 +232,21 @@ export const enrichOffersWithProducts = async (rawOffers) => {
         price: updatedSellingPrice,
         offerBasePrice: updatedSellingPrice,
         promotionalSellingPrice: updatedSellingPrice,
+        offerPrice: updatedSellingPrice,
+        offerSellingPrice: updatedSellingPrice,
+        offerSP: updatedSellingPrice,
+        specialPrice: updatedSellingPrice,
       };
+
+      item.getFreeDetails.updatedSellingPrice = updatedSellingPrice;
+      item.getFreeDetails.sellingPrice = updatedSellingPrice;
+      item.getFreeDetails.price = updatedSellingPrice;
+      item.getFreeDetails.offerBasePrice = updatedSellingPrice;
+      item.getFreeDetails.promotionalSellingPrice = updatedSellingPrice;
+      item.getFreeDetails.offerPrice = updatedSellingPrice;
+      item.getFreeDetails.offerSellingPrice = updatedSellingPrice;
+      item.getFreeDetails.offerSP = updatedSellingPrice;
+      item.getFreeDetails.specialPrice = updatedSellingPrice;
     }
 
     // Enrich productPricing items with all aliases
@@ -237,7 +265,9 @@ export const enrichOffersWithProducts = async (rawOffers) => {
         const updatedSellingPrice = Number(
           pp.updatedSellingPrice !== undefined
             ? pp.updatedSellingPrice
-            : (pp.offerBasePrice !== undefined ? pp.offerBasePrice : (pp.price !== undefined ? pp.price : pp.sellingPrice))
+            : (pp.offerBasePrice !== undefined
+                ? pp.offerBasePrice
+                : (pp.price !== undefined ? pp.price : (pp.offerPrice !== undefined ? pp.offerPrice : pp.sellingPrice)))
         );
 
         return {
@@ -257,6 +287,10 @@ export const enrichOffersWithProducts = async (rawOffers) => {
           price: updatedSellingPrice,
           offerBasePrice: updatedSellingPrice,
           promotionalSellingPrice: updatedSellingPrice,
+          offerPrice: updatedSellingPrice,
+          offerSellingPrice: updatedSellingPrice,
+          offerSP: updatedSellingPrice,
+          specialPrice: updatedSellingPrice,
         };
       });
     }

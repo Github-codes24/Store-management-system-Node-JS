@@ -31,7 +31,11 @@ export const productPricingItemZodSchema = z.preprocess((val) => {
     const pId = val.product || val.productId || val.id || val._id;
     const newPrice = val.updatedSellingPrice !== undefined
       ? val.updatedSellingPrice
-      : (val.offerBasePrice !== undefined ? val.offerBasePrice : val.price);
+      : (val.offerBasePrice !== undefined
+          ? val.offerBasePrice
+          : (val.offerPrice !== undefined
+              ? val.offerPrice
+              : (val.sellingPrice !== undefined ? val.sellingPrice : val.price)));
 
     return {
       ...val,
@@ -48,7 +52,75 @@ export const productPricingItemZodSchema = z.preprocess((val) => {
   originalSellingPrice: z.coerce.number().min(0).optional().default(0),
   updatedSellingPrice: z.coerce.number().min(0).optional(),
   offerBasePrice: z.coerce.number().min(0).optional(),
-}));
+  offerPrice: z.coerce.number().min(0).optional(),
+  offerSellingPrice: z.coerce.number().min(0).optional(),
+  offerSP: z.coerce.number().min(0).optional(),
+  specialPrice: z.coerce.number().min(0).optional(),
+  sellingPrice: z.coerce.number().min(0).optional(),
+  price: z.coerce.number().min(0).optional(),
+}).passthrough());
+
+export const buyDetailsSchema = z.preprocess((val) => {
+  if (val && typeof val === 'object') {
+    const bProduct = val.buyProduct || val.product || val.productId;
+    const bId = bProduct && typeof bProduct === 'object' ? (bProduct._id || bProduct.id || bProduct) : bProduct;
+    const newPrice = val.updatedSellingPrice !== undefined
+      ? val.updatedSellingPrice
+      : (val.offerBasePrice !== undefined
+          ? val.offerBasePrice
+          : (val.offerPrice !== undefined
+              ? val.offerPrice
+              : (val.sellingPrice !== undefined ? val.sellingPrice : val.price)));
+    return {
+      ...val,
+      buyProduct: bId !== undefined && bId !== null ? String(bId) : null,
+      updatedSellingPrice: newPrice,
+    };
+  }
+  return val;
+}, z.object({
+  buyProduct: z.string().optional().nullable(),
+  buyQuantity: z.coerce.number().min(1).optional().default(1),
+  updatedSellingPrice: z.coerce.number().min(0).optional(),
+  offerBasePrice: z.coerce.number().min(0).optional(),
+  offerPrice: z.coerce.number().min(0).optional(),
+  offerSellingPrice: z.coerce.number().min(0).optional(),
+  offerSP: z.coerce.number().min(0).optional(),
+  specialPrice: z.coerce.number().min(0).optional(),
+  sellingPrice: z.coerce.number().min(0).optional(),
+  price: z.coerce.number().min(0).optional(),
+}).passthrough());
+
+export const getFreeDetailsSchema = z.preprocess((val) => {
+  if (val && typeof val === 'object') {
+    const fProduct = val.freeProduct || val.product || val.productId;
+    const fId = fProduct && typeof fProduct === 'object' ? (fProduct._id || fProduct.id || fProduct) : fProduct;
+    const newPrice = val.updatedSellingPrice !== undefined
+      ? val.updatedSellingPrice
+      : (val.offerBasePrice !== undefined
+          ? val.offerBasePrice
+          : (val.offerPrice !== undefined
+              ? val.offerPrice
+              : (val.sellingPrice !== undefined ? val.sellingPrice : val.price)));
+    return {
+      ...val,
+      freeProduct: fId !== undefined && fId !== null ? String(fId) : null,
+      updatedSellingPrice: newPrice,
+    };
+  }
+  return val;
+}, z.object({
+  freeProduct: z.string().optional().nullable(),
+  freeQuantity: z.coerce.number().min(1).optional().default(1),
+  updatedSellingPrice: z.coerce.number().min(0).optional(),
+  offerBasePrice: z.coerce.number().min(0).optional(),
+  offerPrice: z.coerce.number().min(0).optional(),
+  offerSellingPrice: z.coerce.number().min(0).optional(),
+  offerSP: z.coerce.number().min(0).optional(),
+  specialPrice: z.coerce.number().min(0).optional(),
+  sellingPrice: z.coerce.number().min(0).optional(),
+  price: z.coerce.number().min(0).optional(),
+}).passthrough());
 
 export const createOfferSchema = z.object({
   name: z.string({ required_error: 'Offer name is required' }).trim().min(2, 'Offer name must be at least 2 characters'),
@@ -61,21 +133,15 @@ export const createOfferSchema = z.object({
   validTo: z.string({ required_error: 'Valid to / expiry date is required' }),
   discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy', 'special_price'], { required_error: 'Discount type is required' })),
   discountValue: z.coerce.number().min(0).optional().default(0),
-  buyDetails: z.object({
-    buyProduct: z.string().optional().nullable(),
-    buyQuantity: z.coerce.number().min(1).optional().default(1),
-  }).optional(),
-  getFreeDetails: z.object({
-    freeProduct: z.string().optional().nullable(),
-    freeQuantity: z.coerce.number().min(1).optional().default(1),
-  }).optional(),
+  buyDetails: buyDetailsSchema.optional(),
+  getFreeDetails: getFreeDetailsSchema.optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional().default('all'),
   products: z.array(z.string()).optional().default([]),
   productPricing: z.array(productPricingItemZodSchema).optional().default([]),
   sendToAllCustomers: z.boolean().optional().default(true),
   targetCustomers: z.array(z.string()).optional().default([]),
   status: z.enum(['active', 'inactive']).optional().default('active'),
-});
+}).passthrough();
 
 export const updateOfferSchema = z.object({
   name: z.string().trim().min(2, 'Offer name must be at least 2 characters').optional(),
@@ -88,21 +154,15 @@ export const updateOfferSchema = z.object({
   validTo: z.string().optional(),
   discountType: z.preprocess(normalizeDiscountType, z.enum(['percentage', 'flat', 'bogo', 'bxgy', 'special_price'])).optional(),
   discountValue: z.coerce.number().min(0).optional(),
-  buyDetails: z.object({
-    buyProduct: z.string().optional().nullable(),
-    buyQuantity: z.coerce.number().min(1).optional(),
-  }).optional(),
-  getFreeDetails: z.object({
-    freeProduct: z.string().optional().nullable(),
-    freeQuantity: z.coerce.number().min(1).optional(),
-  }).optional(),
+  buyDetails: buyDetailsSchema.optional(),
+  getFreeDetails: getFreeDetailsSchema.optional(),
   appliesTo: z.enum(['all', 'category', 'product']).optional(),
   products: z.array(z.string()).optional(),
   productPricing: z.array(productPricingItemZodSchema).optional(),
   sendToAllCustomers: z.boolean().optional(),
   targetCustomers: z.array(z.string()).optional(),
   status: z.enum(['active', 'inactive']).optional(),
-});
+}).passthrough();
 
 export const toggleOfferStatusSchema = z.object({
   status: z.enum(['active', 'inactive'], { required_error: 'Status is required' }),

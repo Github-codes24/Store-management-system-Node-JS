@@ -106,6 +106,135 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
       });
     }
 
+    // Extract current offer ID if being viewed/edited (via query or referer URL like /offers/edit/:id)
+    const referer = req.headers?.referer || req.headers?.referrer || '';
+    const refererMatch = referer.match(/offers\/edit\/([0-9a-fA-F]{24})/);
+    const currentOfferId = req.query?.offerId || (refererMatch ? refererMatch[1] : null);
+
+    const offerPriceMap = new Map();
+
+    if (currentOfferId) {
+      const currentOffer = await Offer.findOne({ _id: currentOfferId, isDeleted: false }).lean();
+      if (currentOffer) {
+        if (Array.isArray(currentOffer.productPricing)) {
+          for (const pp of currentOffer.productPricing) {
+            const pId = pp.product ? (pp.product._id || pp.product.id || pp.product).toString() : null;
+            const pPrice = pp.updatedSellingPrice !== undefined
+              ? pp.updatedSellingPrice
+              : (pp.offerBasePrice !== undefined
+                  ? pp.offerBasePrice
+                  : (pp.price !== undefined ? pp.price : (pp.offerPrice !== undefined ? pp.offerPrice : pp.sellingPrice)));
+            if (pId && pPrice !== undefined && pPrice !== null && !isNaN(Number(pPrice))) {
+              offerPriceMap.set(pId, Number(pPrice));
+            }
+          }
+        }
+
+        if (currentOffer.buyDetails && currentOffer.buyDetails.buyProduct) {
+          const bProd = currentOffer.buyDetails.buyProduct;
+          const bId = (bProd._id || bProd.id || bProd).toString();
+          const bPrice = currentOffer.buyDetails.updatedSellingPrice !== undefined
+            ? currentOffer.buyDetails.updatedSellingPrice
+            : (currentOffer.buyDetails.offerBasePrice !== undefined
+                ? currentOffer.buyDetails.offerBasePrice
+                : (currentOffer.buyDetails.sellingPrice !== undefined
+                    ? currentOffer.buyDetails.sellingPrice
+                    : (currentOffer.buyDetails.offerPrice !== undefined ? currentOffer.buyDetails.offerPrice : currentOffer.buyDetails.price)));
+          if (bId && bPrice !== undefined && bPrice !== null && !isNaN(Number(bPrice))) {
+            offerPriceMap.set(bId, Number(bPrice));
+          }
+        }
+
+        if (currentOffer.getFreeDetails && currentOffer.getFreeDetails.freeProduct) {
+          const fProd = currentOffer.getFreeDetails.freeProduct;
+          const fId = (fProd._id || fProd.id || fProd).toString();
+          const fPrice = currentOffer.getFreeDetails.updatedSellingPrice !== undefined
+            ? currentOffer.getFreeDetails.updatedSellingPrice
+            : (currentOffer.getFreeDetails.offerBasePrice !== undefined
+                ? currentOffer.getFreeDetails.offerBasePrice
+                : (currentOffer.getFreeDetails.sellingPrice !== undefined
+                    ? currentOffer.getFreeDetails.sellingPrice
+                    : (currentOffer.getFreeDetails.offerPrice !== undefined ? currentOffer.getFreeDetails.offerPrice : currentOffer.getFreeDetails.price)));
+          if (fId && fPrice !== undefined && fPrice !== null && !isNaN(Number(fPrice))) {
+            offerPriceMap.set(fId, Number(fPrice));
+          }
+        }
+      }
+    }
+
+    // Fetch recent non-deleted offers for this store to enrich remaining product options with current offer promotional pricing
+    const offerFilter = { isDeleted: false };
+    if (employeeStoreId) {
+      offerFilter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];
+    }
+
+    const recentOffers = await Offer.find(offerFilter)
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    for (const off of recentOffers) {
+      if (Array.isArray(off.productPricing)) {
+        for (const pp of off.productPricing) {
+          const pId = pp.product ? (pp.product._id || pp.product.id || pp.product).toString() : null;
+          const pPrice = pp.updatedSellingPrice !== undefined
+            ? pp.updatedSellingPrice
+            : (pp.offerBasePrice !== undefined
+                ? pp.offerBasePrice
+                : (pp.price !== undefined ? pp.price : (pp.offerPrice !== undefined ? pp.offerPrice : pp.sellingPrice)));
+          if (pId && pPrice !== undefined && pPrice !== null && !isNaN(Number(pPrice)) && !offerPriceMap.has(pId)) {
+            offerPriceMap.set(pId, Number(pPrice));
+          }
+        }
+      }
+
+      if (off.buyDetails && off.buyDetails.buyProduct) {
+        const bProd = off.buyDetails.buyProduct;
+        const bId = (bProd._id || bProd.id || bProd).toString();
+        const bPrice = off.buyDetails.updatedSellingPrice !== undefined
+          ? off.buyDetails.updatedSellingPrice
+          : (off.buyDetails.offerBasePrice !== undefined
+              ? off.buyDetails.offerBasePrice
+              : (off.buyDetails.sellingPrice !== undefined
+                  ? off.buyDetails.sellingPrice
+                  : (off.buyDetails.offerPrice !== undefined ? off.buyDetails.offerPrice : off.buyDetails.price)));
+        if (bId && bPrice !== undefined && bPrice !== null && !isNaN(Number(bPrice)) && !offerPriceMap.has(bId)) {
+          offerPriceMap.set(bId, Number(bPrice));
+        }
+      }
+
+      if (off.getFreeDetails && off.getFreeDetails.freeProduct) {
+        const fProd = off.getFreeDetails.freeProduct;
+        const fId = (fProd._id || fProd.id || fProd).toString();
+        const fPrice = off.getFreeDetails.updatedSellingPrice !== undefined
+          ? off.getFreeDetails.updatedSellingPrice
+          : (off.getFreeDetails.offerBasePrice !== undefined
+              ? off.getFreeDetails.offerBasePrice
+              : (off.getFreeDetails.sellingPrice !== undefined
+                  ? off.getFreeDetails.sellingPrice
+                  : (off.getFreeDetails.offerPrice !== undefined ? off.getFreeDetails.offerPrice : off.getFreeDetails.price)));
+        if (fId && fPrice !== undefined && fPrice !== null && !isNaN(Number(fPrice)) && !offerPriceMap.has(fId)) {
+          offerPriceMap.set(fId, Number(fPrice));
+        }
+      }
+    }
+
+    productItems = productItems.map((item) => {
+      const pIdStr = (item._id || item.id).toString();
+      const offerSp = offerPriceMap.get(pIdStr);
+      if (offerSp !== undefined && offerSp !== null && !isNaN(Number(offerSp))) {
+        return {
+          ...item,
+          updatedSellingPrice: Number(offerSp),
+          offerPrice: Number(offerSp),
+          offerSellingPrice: Number(offerSp),
+          offerSP: Number(offerSp),
+          specialPrice: Number(offerSp),
+          promotionalSellingPrice: Number(offerSp),
+        };
+      }
+      return item;
+    });
+
     // Fetch live categories
     const liveCategories = await Category.find({ status: 'active' })
       .select('_id name')
@@ -550,57 +679,85 @@ export const updateStoreOffer = async (req, res, next) => {
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
 
+    let buyUpdatedSp;
+    let bProdId = null;
     if (updateData.buyDetails !== undefined) {
       const bProduct = updateData.buyDetails.buyProduct || updateData.buyDetails.product || updateData.buyDetails.productId;
-      const bProdId = bProduct ? (bProduct._id || bProduct.id || bProduct).toString() : null;
+      bProdId = bProduct ? (bProduct._id || bProduct.id || bProduct).toString() : null;
       offer.buyDetails = {
         buyProduct: bProdId || null,
         buyQuantity: Number(updateData.buyDetails.buyQuantity) || 1,
       };
 
-      const buyUpdatedSp = updateData.buyDetails.updatedSellingPrice !== undefined
+      const rawBuySp = updateData.buyDetails.updatedSellingPrice !== undefined
         ? updateData.buyDetails.updatedSellingPrice
         : (updateData.buyDetails.offerBasePrice !== undefined
             ? updateData.buyDetails.offerBasePrice
-            : (updateData.buyDetails.sellingPrice !== undefined ? updateData.buyDetails.sellingPrice : updateData.buyDetails.price));
+            : (updateData.buyDetails.sellingPrice !== undefined
+                ? updateData.buyDetails.sellingPrice
+                : (updateData.buyDetails.offerPrice !== undefined
+                    ? updateData.buyDetails.offerPrice
+                    : (updateData.buyDetails.offerSellingPrice !== undefined
+                        ? updateData.buyDetails.offerSellingPrice
+                        : (updateData.buyDetails.offerSP !== undefined
+                            ? updateData.buyDetails.offerSP
+                            : updateData.buyDetails.price)))));
 
-      if (bProdId && buyUpdatedSp !== undefined && buyUpdatedSp !== null && !isNaN(Number(buyUpdatedSp))) {
+      if (rawBuySp !== undefined && rawBuySp !== null && !isNaN(Number(rawBuySp))) {
+        buyUpdatedSp = Number(rawBuySp);
+      }
+
+      if (bProdId && buyUpdatedSp !== undefined) {
         if (!Array.isArray(offer.productPricing)) offer.productPricing = [];
         const existingIdx = offer.productPricing.findIndex((pp) => String(pp.product) === String(bProdId));
         if (existingIdx >= 0) {
-          offer.productPricing[existingIdx].updatedSellingPrice = Number(buyUpdatedSp);
+          offer.productPricing[existingIdx].updatedSellingPrice = buyUpdatedSp;
         } else {
           offer.productPricing.push({
             product: bProdId,
-            updatedSellingPrice: Number(buyUpdatedSp),
+            updatedSellingPrice: buyUpdatedSp,
           });
         }
       }
     }
 
+    let freeUpdatedSp;
+    let fProdId = null;
     if (updateData.getFreeDetails !== undefined) {
       const fProduct = updateData.getFreeDetails.freeProduct || updateData.getFreeDetails.product || updateData.getFreeDetails.productId;
-      const fProdId = fProduct ? (fProduct._id || fProduct.id || fProduct).toString() : null;
+      fProdId = fProduct ? (fProduct._id || fProduct.id || fProduct).toString() : null;
       offer.getFreeDetails = {
         freeProduct: fProdId || null,
         freeQuantity: Number(updateData.getFreeDetails.freeQuantity) || 1,
       };
 
-      const freeUpdatedSp = updateData.getFreeDetails.updatedSellingPrice !== undefined
+      const rawFreeSp = updateData.getFreeDetails.updatedSellingPrice !== undefined
         ? updateData.getFreeDetails.updatedSellingPrice
         : (updateData.getFreeDetails.offerBasePrice !== undefined
             ? updateData.getFreeDetails.offerBasePrice
-            : (updateData.getFreeDetails.sellingPrice !== undefined ? updateData.getFreeDetails.sellingPrice : updateData.getFreeDetails.price));
+            : (updateData.getFreeDetails.sellingPrice !== undefined
+                ? updateData.getFreeDetails.sellingPrice
+                : (updateData.getFreeDetails.offerPrice !== undefined
+                    ? updateData.getFreeDetails.offerPrice
+                    : (updateData.getFreeDetails.offerSellingPrice !== undefined
+                        ? updateData.getFreeDetails.offerSellingPrice
+                        : (updateData.getFreeDetails.offerSP !== undefined
+                            ? updateData.getFreeDetails.offerSP
+                            : updateData.getFreeDetails.price)))));
 
-      if (fProdId && freeUpdatedSp !== undefined && freeUpdatedSp !== null && !isNaN(Number(freeUpdatedSp))) {
+      if (rawFreeSp !== undefined && rawFreeSp !== null && !isNaN(Number(rawFreeSp))) {
+        freeUpdatedSp = Number(rawFreeSp);
+      }
+
+      if (fProdId && freeUpdatedSp !== undefined) {
         if (!Array.isArray(offer.productPricing)) offer.productPricing = [];
         const existingIdx = offer.productPricing.findIndex((pp) => String(pp.product) === String(fProdId));
         if (existingIdx >= 0) {
-          offer.productPricing[existingIdx].updatedSellingPrice = Number(freeUpdatedSp);
+          offer.productPricing[existingIdx].updatedSellingPrice = freeUpdatedSp;
         } else {
           offer.productPricing.push({
             product: fProdId,
-            updatedSellingPrice: Number(freeUpdatedSp),
+            updatedSellingPrice: freeUpdatedSp,
           });
         }
       }
@@ -628,9 +785,26 @@ export const updateStoreOffer = async (req, res, next) => {
               ? storeProd.offlineSellingPrice
               : (storeProd?.sellingPrice || storeProd?.mrp || item.originalSellingPrice || 0)
           );
-          const rawPrice = item.updatedSellingPrice !== undefined
+          let rawPrice = item.updatedSellingPrice !== undefined
             ? item.updatedSellingPrice
-            : (item.offerBasePrice !== undefined ? item.offerBasePrice : (item.price !== undefined ? item.price : item.sellingPrice));
+            : (item.offerBasePrice !== undefined
+                ? item.offerBasePrice
+                : (item.price !== undefined
+                    ? item.price
+                    : (item.offerPrice !== undefined
+                        ? item.offerPrice
+                        : (item.offerSellingPrice !== undefined
+                            ? item.offerSellingPrice
+                            : (item.offerSP !== undefined ? item.offerSP : item.sellingPrice)))));
+
+          // Check if buyDetails or getFreeDetails had an updated price for this product
+          if ((rawPrice === undefined || rawPrice === null || rawPrice === '') && bProdId && String(prodId) === String(bProdId) && buyUpdatedSp !== undefined) {
+            rawPrice = buyUpdatedSp;
+          }
+          if ((rawPrice === undefined || rawPrice === null || rawPrice === '') && fProdId && String(prodId) === String(fProdId) && freeUpdatedSp !== undefined) {
+            rawPrice = freeUpdatedSp;
+          }
+
           const updatedSp = rawPrice !== undefined && rawPrice !== null && !isNaN(Number(rawPrice))
             ? Number(rawPrice)
             : originalSp;
@@ -655,6 +829,22 @@ export const updateStoreOffer = async (req, res, next) => {
             originalSellingPrice: originalSp,
             updatedSellingPrice: updatedSp,
           });
+        }
+
+        // Guarantee buyProduct is in validatedPricing if buyUpdatedSp is set
+        if (bProdId && buyUpdatedSp !== undefined) {
+          const hasBProd = validatedPricing.some((pp) => String(pp.product) === String(bProdId));
+          if (!hasBProd) {
+            let storeProd = await StoreProduct.findById(bProdId).lean() || await AdminProduct.findById(bProdId).lean();
+            validatedPricing.push({
+              product: bProdId,
+              productName: storeProd?.productName || storeProd?.name || 'Product A',
+              barcode: storeProd?.barcode || '',
+              mrp: Number(storeProd?.mrp || 0),
+              originalSellingPrice: Number(storeProd?.offlineSellingPrice || storeProd?.sellingPrice || 0),
+              updatedSellingPrice: buyUpdatedSp,
+            });
+          }
         }
 
         offer.productPricing = validatedPricing;
