@@ -330,12 +330,13 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       autoComputedSubtotal += itemTotal;
 
       // Decrement stock from specific batch in storeProduct
+      const cleanBatch = itemBatch.replace(/\s*\(Offer:.*?\)/i, '').trim();
       if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
         let batchIndex = storeProd.batches.findIndex(
-          (b) => (b.batchNumber || '').trim().toLowerCase() === itemBatch.toLowerCase()
+          (b) => (b.batchNumber || '').trim().toLowerCase() === cleanBatch.toLowerCase()
         );
 
-        if (batchIndex < 0 && (itemBatch.toLowerCase() === 'default' || !itemBatch)) {
+        if (batchIndex < 0 && (cleanBatch.toLowerCase() === 'default' || !cleanBatch || cleanBatch.toLowerCase().includes('default'))) {
           batchIndex = storeProd.batches.findIndex((b) => (Number(b.stockQuantity) || 0) > 0);
         }
 
@@ -372,11 +373,14 @@ export const createOrAppendOrderBill = async (req, res, next) => {
 
       await storeProd.save();
 
+      const matchedOfferName = item.offerName || (promoPrice !== null ? (activePricingMap.get(String(storeProd._id))?.offerName || appliedOffer?.name) : '') || '';
       processedItems.push({
         product: storeProd._id,
         productName: item.productName || storeProd.productName,
         barcode: item.barcode || storeProd.barcode || '',
         batch: itemBatch,
+        offerName: matchedOfferName,
+        offerBadge: item.offerBadge || (matchedOfferName ? `Offer: ${matchedOfferName}` : ''),
         mrp: itemMrp,
         sellingPrice: unitPrice,
         purchasePrice: parseFloat(item.purchasePrice !== undefined ? item.purchasePrice : (storeProd.purchasePrice || 0)),
@@ -557,6 +561,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       existingBill.discountValue = finalDiscountValue;
       existingBill.discountAmount = finalDiscountAmount;
       if (offerId || appliedOffer) existingBill.offerId = offerId || appliedOffer._id;
+      existingBill.cashier = req.storeEmployee?.name || 'Aditya';
       existingBill.netAmount = calculatedNetAmount;
       existingBill.paymentStatus = calculatedPaymentStatus;
       existingBill.paymentMethod = primaryPaymentMethod;
@@ -609,6 +614,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       billNumber,
       saleType,
       billDate: new Date(),
+      cashier: req.storeEmployee?.name || 'Aditya',
       items: processedItems,
       totalItems: processedItems.reduce((sum, it) => sum + it.quantity, 0),
       grossAmount: finalGrossAmount,

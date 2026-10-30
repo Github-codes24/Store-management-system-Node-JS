@@ -217,6 +217,12 @@ export const getStoreProducts = async (req, res, next) => {
       const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
       const effectiveOfflineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.offlineSellingPrice;
       const effectiveOnlineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.onlineSellingPrice;
+      const offerTag = (hasOffer && promoInfo.offerName) ? `(Offer: ${promoInfo.offerName})` : '';
+
+      const baseBatch = product.batch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : '');
+      const effectiveBatch = (isBillingPage && hasOffer && offerTag)
+        ? (baseBatch ? `${baseBatch} ${offerTag}` : `Default Batch ${offerTag}`)
+        : (baseBatch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : ''));
 
       return {
         _id: product._id,
@@ -231,12 +237,15 @@ export const getStoreProducts = async (req, res, next) => {
         category: product.category,
         subcategory: product.subcategory,
         batchType: product.batchType,
-        batch: product.batch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : ''),
+        batch: effectiveBatch,
         batches: Array.isArray(product.batches)
           ? product.batches
               .filter((b) => (Number(b.stockQuantity) || 0) > 0)
               .map((b) => ({
                 ...b,
+                batchNumber: (isBillingPage && hasOffer && offerTag)
+                  ? `${b.batchNumber} ${offerTag}`
+                  : b.batchNumber,
                 originalSellingPrice: b.offlineSellingPrice || product.offlineSellingPrice,
                 offlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.offlineSellingPrice || product.offlineSellingPrice),
                 onlineSellingPrice: (isBillingPage && hasOffer) ? promotionalSellingPrice : (b.onlineSellingPrice || product.onlineSellingPrice),
@@ -346,6 +355,10 @@ export const getStoreProductById = async (req, res, next) => {
       : null;
 
     if (isBillingPage && hasOffer && promotionalSellingPrice > 0) {
+      const offerTag = promoInfo.offerName ? `(Offer: ${promoInfo.offerName})` : '';
+      if (offerTag) {
+        product.batch = product.batch ? `${product.batch} ${offerTag}` : `Default Batch ${offerTag}`;
+      }
       product.originalSellingPrice = product.offlineSellingPrice;
       product.catalogSellingPrice = product.offlineSellingPrice;
       product.offlineSellingPrice = promotionalSellingPrice;
@@ -353,6 +366,7 @@ export const getStoreProductById = async (req, res, next) => {
       if (Array.isArray(product.batches)) {
         product.batches = product.batches.map((b) => ({
           ...b,
+          batchNumber: offerTag ? `${b.batchNumber} ${offerTag}` : b.batchNumber,
           originalSellingPrice: b.offlineSellingPrice || product.originalSellingPrice,
           offlineSellingPrice: promotionalSellingPrice,
           sellingPrice: promotionalSellingPrice,
@@ -1233,6 +1247,10 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
       : null;
 
     if (hasOffer && promotionalSellingPrice > 0) {
+      const offerTag = promoInfo.offerName ? `(Offer: ${promoInfo.offerName})` : '';
+      if (offerTag) {
+        productData.batch = productData.batch ? `${productData.batch} ${offerTag}` : `Default Batch ${offerTag}`;
+      }
       productData.originalSellingPrice = productData.offlineSellingPrice;
       productData.catalogSellingPrice = productData.offlineSellingPrice;
       productData.offlineSellingPrice = promotionalSellingPrice;
@@ -1240,6 +1258,7 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
       if (Array.isArray(productData.batches)) {
         productData.batches = productData.batches.map((b) => ({
           ...b,
+          batchNumber: offerTag ? `${b.batchNumber} ${offerTag}` : b.batchNumber,
           originalSellingPrice: b.offlineSellingPrice || productData.originalSellingPrice,
           offlineSellingPrice: promotionalSellingPrice,
           sellingPrice: promotionalSellingPrice,

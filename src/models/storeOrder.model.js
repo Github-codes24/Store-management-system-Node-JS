@@ -22,6 +22,16 @@ const billItemSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    offerName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    offerBadge: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     mrp: {
       type: Number,
       default: 0,
@@ -173,6 +183,11 @@ const billSchema = new mongoose.Schema(
     billDate: {
       type: Date,
       default: Date.now,
+    },
+    cashier: {
+      type: String,
+      trim: true,
+      default: 'Aditya',
     },
     items: {
       type: [billItemSchema],
