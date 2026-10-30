@@ -5,8 +5,8 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Category from '../../models/category.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
+import { enrichOffersWithProducts, buildOfferPerformanceData } from '../../utils/offerHelper.js';
 import { getPagination } from '../../utils/pagination.js';
-import { enrichOffersWithProducts } from '../../utils/offerHelper.js';
 
 /**
  * Get Pre-Requisite Options for Store Panel Offer Form (Store-scoped Customers, Live Products & Categories)
@@ -224,9 +224,12 @@ export const createStoreOffer = async (req, res, next) => {
             ? storeProd.offlineSellingPrice
             : (storeProd?.sellingPrice || storeProd?.mrp || item.originalSellingPrice || 0)
         );
-        const updatedSp = Number(
-          item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice
-        );
+        const rawPrice = item.updatedSellingPrice !== undefined
+          ? item.updatedSellingPrice
+          : (item.offerBasePrice !== undefined ? item.offerBasePrice : (item.price !== undefined ? item.price : item.sellingPrice));
+        const updatedSp = rawPrice !== undefined && rawPrice !== null && !isNaN(Number(rawPrice))
+          ? Number(rawPrice)
+          : originalSp;
 
         if (isNaN(updatedSp) || updatedSp < 0) {
           return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
@@ -249,6 +252,35 @@ export const createStoreOffer = async (req, res, next) => {
           originalSellingPrice: originalSp,
           updatedSellingPrice: updatedSp,
         });
+      }
+    }
+
+    if (buyDetails && buyDetails.buyProduct) {
+      const bProdId = (buyDetails.buyProduct._id || buyDetails.buyProduct.id || buyDetails.buyProduct).toString();
+      const bRawPrice = buyDetails.updatedSellingPrice !== undefined
+        ? buyDetails.updatedSellingPrice
+        : (buyDetails.offerBasePrice !== undefined
+            ? buyDetails.offerBasePrice
+            : (buyDetails.sellingPrice !== undefined ? buyDetails.sellingPrice : buyDetails.price));
+
+      if (bProdId && bRawPrice !== undefined && bRawPrice !== null && !isNaN(Number(bRawPrice))) {
+        const existingIdx = validatedProductPricing.findIndex((pp) => String(pp.product) === String(bProdId));
+        if (existingIdx >= 0) {
+          validatedProductPricing[existingIdx].updatedSellingPrice = Number(bRawPrice);
+        } else {
+          let storeProd = await StoreProduct.findById(bProdId).lean() || await AdminProduct.findById(bProdId).lean();
+          const prodName = storeProd?.productName || storeProd?.name || 'Product';
+          const realMrp = Number(storeProd?.mrp || 0);
+          const originalSp = Number(storeProd?.offlineSellingPrice !== undefined ? storeProd.offlineSellingPrice : (storeProd?.sellingPrice || realMrp));
+          validatedProductPricing.push({
+            product: bProdId,
+            productName: prodName,
+            barcode: storeProd?.barcode || '',
+            mrp: realMrp,
+            originalSellingPrice: originalSp,
+            updatedSellingPrice: Number(bRawPrice),
+          });
+        }
       }
     }
 
@@ -287,8 +319,8 @@ export const createStoreOffer = async (req, res, next) => {
     const populatedOffer = await Offer.findById(offer._id)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('buyDetails.buyProduct', 'productName name barcode')
-      .populate('getFreeDetails.freeProduct', 'productName name barcode');
+      .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
 
     const enrichedOffer = await enrichOffersWithProducts(populatedOffer);
 
@@ -332,8 +364,8 @@ export const getStoreOffers = async (req, res, next) => {
     let offers = await Offer.find(filter)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email')
-      .populate('buyDetails.buyProduct', 'productName name barcode')
-      .populate('getFreeDetails.freeProduct', 'productName name barcode')
+      .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
       .sort({ createdAt: -1 });
 
     const enrichedOffers = await enrichOffersWithProducts(offers);
@@ -418,12 +450,13 @@ export const getStoreOffers = async (req, res, next) => {
 export const getStoreOfferById = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
 
     const offer = await Offer.findOne({ _id: id, isDeleted: false })
       .populate('stores', 'name storeCode location')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
-      .populate('buyDetails.buyProduct', 'productName name barcode')
-      .populate('getFreeDetails.freeProduct', 'productName name barcode');
+      .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
 
     if (!offer) {
       return next(notFound('Offer not found'));
@@ -435,6 +468,8 @@ export const getStoreOfferById = async (req, res, next) => {
     const isExpired = new Date(enrichedOffer.validTo) < now;
     const displayStatus = isExpired ? 'expired' : enrichedOffer.status;
 
+    const performanceReport = await buildOfferPerformanceData(offer, employeeStoreId);
+
     return res.status(200).json(
       successResponse({
         message: 'Store offer details fetched successfully',
@@ -443,8 +478,43 @@ export const getStoreOfferById = async (req, res, next) => {
             ...enrichedOffer,
             displayStatus,
             isExpired,
+            performance: performanceReport,
+            report: performanceReport,
           },
+          performance: performanceReport,
+          report: performanceReport,
         },
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get Offer Performance & Profit / Loss Report
+ * Calculates KPI metrics and product sales breakdown with both positive profit and negative loss.
+ */
+export const getStoreOfferPerformanceReport = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
+
+    const offer = await Offer.findOne({ _id: id, isDeleted: false })
+      .populate('stores', 'name storeCode location')
+      .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
+
+    if (!offer) {
+      return next(notFound('Offer not found'));
+    }
+
+    const performanceData = await buildOfferPerformanceData(offer, employeeStoreId);
+
+    return res.status(200).json(
+      successResponse({
+        message: 'Offer performance and profit report retrieved successfully',
+        data: performanceData,
       })
     );
   } catch (error) {
@@ -479,6 +549,63 @@ export const updateStoreOffer = async (req, res, next) => {
     }
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
+
+    if (updateData.buyDetails !== undefined) {
+      const bProduct = updateData.buyDetails.buyProduct || updateData.buyDetails.product || updateData.buyDetails.productId;
+      const bProdId = bProduct ? (bProduct._id || bProduct.id || bProduct).toString() : null;
+      offer.buyDetails = {
+        buyProduct: bProdId || null,
+        buyQuantity: Number(updateData.buyDetails.buyQuantity) || 1,
+      };
+
+      const buyUpdatedSp = updateData.buyDetails.updatedSellingPrice !== undefined
+        ? updateData.buyDetails.updatedSellingPrice
+        : (updateData.buyDetails.offerBasePrice !== undefined
+            ? updateData.buyDetails.offerBasePrice
+            : (updateData.buyDetails.sellingPrice !== undefined ? updateData.buyDetails.sellingPrice : updateData.buyDetails.price));
+
+      if (bProdId && buyUpdatedSp !== undefined && buyUpdatedSp !== null && !isNaN(Number(buyUpdatedSp))) {
+        if (!Array.isArray(offer.productPricing)) offer.productPricing = [];
+        const existingIdx = offer.productPricing.findIndex((pp) => String(pp.product) === String(bProdId));
+        if (existingIdx >= 0) {
+          offer.productPricing[existingIdx].updatedSellingPrice = Number(buyUpdatedSp);
+        } else {
+          offer.productPricing.push({
+            product: bProdId,
+            updatedSellingPrice: Number(buyUpdatedSp),
+          });
+        }
+      }
+    }
+
+    if (updateData.getFreeDetails !== undefined) {
+      const fProduct = updateData.getFreeDetails.freeProduct || updateData.getFreeDetails.product || updateData.getFreeDetails.productId;
+      const fProdId = fProduct ? (fProduct._id || fProduct.id || fProduct).toString() : null;
+      offer.getFreeDetails = {
+        freeProduct: fProdId || null,
+        freeQuantity: Number(updateData.getFreeDetails.freeQuantity) || 1,
+      };
+
+      const freeUpdatedSp = updateData.getFreeDetails.updatedSellingPrice !== undefined
+        ? updateData.getFreeDetails.updatedSellingPrice
+        : (updateData.getFreeDetails.offerBasePrice !== undefined
+            ? updateData.getFreeDetails.offerBasePrice
+            : (updateData.getFreeDetails.sellingPrice !== undefined ? updateData.getFreeDetails.sellingPrice : updateData.getFreeDetails.price));
+
+      if (fProdId && freeUpdatedSp !== undefined && freeUpdatedSp !== null && !isNaN(Number(freeUpdatedSp))) {
+        if (!Array.isArray(offer.productPricing)) offer.productPricing = [];
+        const existingIdx = offer.productPricing.findIndex((pp) => String(pp.product) === String(fProdId));
+        if (existingIdx >= 0) {
+          offer.productPricing[existingIdx].updatedSellingPrice = Number(freeUpdatedSp);
+        } else {
+          offer.productPricing.push({
+            product: fProdId,
+            updatedSellingPrice: Number(freeUpdatedSp),
+          });
+        }
+      }
+    }
+
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
     if (updateData.products !== undefined) offer.products = updateData.products;
 
@@ -501,9 +628,12 @@ export const updateStoreOffer = async (req, res, next) => {
               ? storeProd.offlineSellingPrice
               : (storeProd?.sellingPrice || storeProd?.mrp || item.originalSellingPrice || 0)
           );
-          const updatedSp = Number(
-            item.updatedSellingPrice !== undefined ? item.updatedSellingPrice : item.offerBasePrice
-          );
+          const rawPrice = item.updatedSellingPrice !== undefined
+            ? item.updatedSellingPrice
+            : (item.offerBasePrice !== undefined ? item.offerBasePrice : (item.price !== undefined ? item.price : item.sellingPrice));
+          const updatedSp = rawPrice !== undefined && rawPrice !== null && !isNaN(Number(rawPrice))
+            ? Number(rawPrice)
+            : originalSp;
 
           if (isNaN(updatedSp) || updatedSp < 0) {
             return next(badRequest(`Invalid updated selling price for product "${prodName}"`));
@@ -546,8 +676,8 @@ export const updateStoreOffer = async (req, res, next) => {
     const updatedOffer = await Offer.findById(id)
       .populate('stores', 'name storeCode')
       .populate('targetCustomers', 'name phone email')
-      .populate('buyDetails.buyProduct', 'productName name barcode')
-      .populate('getFreeDetails.freeProduct', 'productName name barcode');
+      .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
+      .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
 
     const enrichedOffer = await enrichOffersWithProducts(updatedOffer);
 

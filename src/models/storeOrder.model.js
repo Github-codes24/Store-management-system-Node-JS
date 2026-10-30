@@ -246,6 +246,11 @@ const billSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    offerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Offer',
+      default: null,
+    },
     payments: [paymentRecordSchema],
   },
   { _id: true, timestamps: true }
@@ -405,6 +410,7 @@ const storeOrderSchema = new mongoose.Schema(
 );
 
 storeOrderSchema.index({ 'bills.billId': 1 });
+storeOrderSchema.index({ 'bills.offerId': 1, store: 1 });
 storeOrderSchema.index({ createdAt: -1 });
 
 const StoreOrder = mongoose.models.StoreOrder || mongoose.model('StoreOrder', storeOrderSchema);

@@ -508,4 +508,316 @@ describe('Store Panel Offers Integration Tests', () => {
     expect(prodAfter.hasActiveOffer).toBe(false);
     expect(prodAfter.activeOffer).toBeNull();
   });
+
+  it('should accurately generate offer performance report with both profit and loss scenarios', async () => {
+    // 1. Create a profitable product (Purchase 70, Sell 100 => +30 profit)
+    const profitProd = await StoreProduct.create({
+      storeId,
+      barcode: 'PERF_PROFIT_001',
+      productName: 'Profitable Festive Juice',
+      mrp: 150,
+      offlineSellingPrice: 120,
+      onlineSellingPrice: 120,
+      purchasePrice: 70,
+      stockQuantity: 50,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    // 2. Create a loss-making product (Purchase 98, Sell 20 => -78 loss)
+    const lossProd = await StoreProduct.create({
+      storeId,
+      barcode: 'PERF_LOSS_001',
+      productName: 'Heavy Markdown Incense',
+      mrp: 150,
+      offlineSellingPrice: 140,
+      onlineSellingPrice: 140,
+      purchasePrice: 98,
+      stockQuantity: 50,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const offerRes = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'Festive PnL Test Offer',
+        validFrom: today,
+        validTo: nextWeek,
+        discountType: 'special_price',
+        productPricing: [
+          {
+            product: profitProd._id.toString(),
+            productName: profitProd.productName,
+            mrp: 150,
+            originalSellingPrice: 120,
+            updatedSellingPrice: 100, // Profit +30
+          },
+          {
+            product: lossProd._id.toString(),
+            productName: lossProd.productName,
+            mrp: 150,
+            originalSellingPrice: 140,
+            updatedSellingPrice: 20, // Loss -78
+          },
+        ],
+      });
+
+    expect(offerRes.status).toBe(201);
+    const offerId = offerRes.body.data.offer._id;
+
+    // 3. Test GET /api/store-employee/offers/:id/performance before any sales
+    const reportRes = await request(app)
+      .get(`/api/store-employee/offers/${offerId}/performance`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(reportRes.status).toBe(200);
+    expect(reportRes.body.success).toBe(true);
+
+    const breakdown = reportRes.body.data.productBreakdown;
+    expect(breakdown.length).toBe(2);
+
+    const profitItem = breakdown.find((p) => p.barcode === 'PERF_PROFIT_001');
+    expect(profitItem).toBeDefined();
+    expect(profitItem.purchasingPrice).toBe(70);
+    expect(profitItem.updatedSellingPrice).toBe(100);
+    expect(profitItem.profitPerUnit).toBe(30);
+    expect(profitItem.isUnitLoss).toBe(false);
+
+    const lossItem = breakdown.find((p) => p.barcode === 'PERF_LOSS_001');
+    expect(lossItem).toBeDefined();
+    expect(lossItem.purchasingPrice).toBe(98);
+    expect(lossItem.updatedSellingPrice).toBe(20);
+    expect(lossItem.profitPerUnit).toBe(-78);
+    expect(lossItem.isUnitLoss).toBe(true);
+
+    // 4. Create a bill selling 2 units of the loss product
+    const billRes = await request(app)
+      .post('/api/store-employee/billing/bills')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        saleType: 'Offline',
+        items: [
+          {
+            product: lossProd._id.toString(),
+            productName: lossProd.productName,
+            barcode: lossProd.barcode,
+            quantity: 2,
+            mrp: 150,
+            sellingPrice: 20,
+            purchasePrice: 98,
+          },
+        ],
+        offerId,
+        paymentMethod: 'Cash',
+        paidAmount: 40,
+      });
+
+    expect(billRes.status).toBe(201);
+
+    // 5. Test GET /api/store-employee/offers/:id/performance after sales
+    const postSalesRes = await request(app)
+      .get(`/api/store-employee/offers/${offerId}/performance`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(postSalesRes.status).toBe(200);
+    const summary = postSalesRes.body.data.summary;
+    expect(summary.totalSold).toBe(2);
+    expect(summary.totalRevenue).toBe(40);
+    expect(summary.isLoss).toBe(true);
+    expect(summary.netProfit).toBe(-156); // 2 units * -78 = -156 Loss!
+
+    const postLossItem = postSalesRes.body.data.productBreakdown.find((p) => p.barcode === 'PERF_LOSS_001');
+    expect(postLossItem.unitsSold).toBe(2);
+    expect(postLossItem.revenue).toBe(40);
+    expect(postLossItem.realizedProfit).toBe(-156);
+    expect(postLossItem.isRealizedLoss).toBe(true);
+
+    // 6. Test GET /api/store-employee/offers/:id also includes performance
+    const getOfferRes = await request(app)
+      .get(`/api/store-employee/offers/${offerId}`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(getOfferRes.status).toBe(200);
+    expect(getOfferRes.body.data.offer.performance).toBeDefined();
+    expect(getOfferRes.body.data.offer.performance.summary.totalSold).toBe(2);
+    expect(getOfferRes.body.data.offer.performance.summary.netProfit).toBe(-156);
+  });
+
+  it('should guarantee that offer price edit persists in offer details without overriding inventory catalog price', async () => {
+    // 1. Setup product with standard offline catalog price 140, MRP 150, purchase 140
+    const prod = await StoreProduct.create({
+      storeId,
+      barcode: 'PROOF_TEST_001',
+      productName: 'Foolproof Test Biscuit',
+      mrp: 150,
+      offlineSellingPrice: 140, // Standard normal catalog rate
+      onlineSellingPrice: 140,
+      purchasePrice: 140,
+      stockQuantity: 100,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const freeProd = await StoreProduct.create({
+      storeId,
+      barcode: 'PROOF_FREE_001',
+      productName: 'Foolproof Free Candy',
+      mrp: 50,
+      offlineSellingPrice: 40,
+      onlineSellingPrice: 40,
+      purchasePrice: 20,
+      stockQuantity: 100,
+      productType: new mongoose.Types.ObjectId(),
+      category: new mongoose.Types.ObjectId(),
+      subcategory: new mongoose.Types.ObjectId(),
+      brand: new mongoose.Types.ObjectId(),
+      unit: new mongoose.Types.ObjectId(),
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // 2. Create BXGY offer with updatedSellingPrice = 20 for buyProduct
+    const createRes = await request(app)
+      .post('/api/store-employee/offers')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'BXGY Price Persistence Test',
+        validFrom: today,
+        validTo: tomorrow,
+        discountType: 'bxgy',
+        buyDetails: {
+          buyProduct: prod._id.toString(),
+          buyQuantity: 1,
+          updatedSellingPrice: 20, // Discounted offer rate
+        },
+        getFreeDetails: {
+          freeProduct: freeProd._id.toString(),
+          freeQuantity: 1,
+        },
+        productPricing: [
+          {
+            product: prod._id.toString(),
+            productName: prod.productName,
+            mrp: 150,
+            originalSellingPrice: 140,
+            updatedSellingPrice: 20,
+          },
+        ],
+      });
+
+    expect(createRes.status).toBe(201);
+    const offerId = createRes.body.data.offer._id;
+
+    // 3. VERIFY INVENTORY: offlineSellingPrice must remain standard (140), promotionalSellingPrice is 20
+    const invRes = await request(app)
+      .get('/api/store-employee/products')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .query({ search: 'PROOF_TEST_001' });
+
+    expect(invRes.status).toBe(200);
+    const invItem = invRes.body.data.find((p) => p.barcode === 'PROOF_TEST_001');
+    expect(invItem.offlineSellingPrice).toBe(140); // Normal price in inventory table!
+    expect(invItem.promotionalSellingPrice).toBe(20); // Offer price separated!
+    expect(invItem.hasActiveOffer).toBe(true);
+
+    // 4. VERIFY OFFER DETAILS: GET /api/store-employee/offers/:id must return 20, NOT 140
+    const offerDetailsRes1 = await request(app)
+      .get(`/api/store-employee/offers/${offerId}`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(offerDetailsRes1.status).toBe(200);
+    const off1 = offerDetailsRes1.body.data.offer;
+    expect(off1.buyDetails.buyProduct.updatedSellingPrice).toBe(20);
+    expect(off1.buyDetails.buyProduct.sellingPrice).toBe(20);
+    expect(off1.buyDetails.buyProduct.offlineSellingPrice).toBe(140);
+    expect(off1.productPricing[0].updatedSellingPrice).toBe(20);
+    expect(off1.productPricing[0].sellingPrice).toBe(20);
+
+    // 5. USER EDITS THE PRICE: User opens Edit modal and changes price to 25
+    const updateRes = await request(app)
+      .put(`/api/store-employee/offers/${offerId}`)
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({
+        name: 'BXGY Price Persistence Test (Edited)',
+        validFrom: today,
+        validTo: tomorrow,
+        discountType: 'bxgy',
+        buyDetails: {
+          buyProduct: prod._id.toString(),
+          buyQuantity: 1,
+          updatedSellingPrice: 25, // Changed to 25!
+        },
+        getFreeDetails: {
+          freeProduct: freeProd._id.toString(),
+          freeQuantity: 1,
+        },
+        productPricing: [
+          {
+            product: prod._id.toString(),
+            productName: prod.productName,
+            mrp: 150,
+            originalSellingPrice: 140,
+            updatedSellingPrice: 25,
+          },
+        ],
+      });
+
+    expect(updateRes.status).toBe(200);
+    const updatedOffer = updateRes.body.data.offer;
+    expect(updatedOffer.buyDetails.buyProduct.updatedSellingPrice).toBe(25);
+    expect(updatedOffer.buyDetails.buyProduct.sellingPrice).toBe(25);
+    expect(updatedOffer.productPricing[0].updatedSellingPrice).toBe(25);
+
+    // 6. RELOAD OFFER DETAILS (Simulating reopening the Edit modal in UI):
+    // Price MUST stay 25 and NEVER revert to 140!
+    const offerDetailsRes2 = await request(app)
+      .get(`/api/store-employee/offers/${offerId}`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(offerDetailsRes2.status).toBe(200);
+    const off2 = offerDetailsRes2.body.data.offer;
+    expect(off2.buyDetails.buyProduct.updatedSellingPrice).toBe(25);
+    expect(off2.buyDetails.buyProduct.sellingPrice).toBe(25);
+    expect(off2.productPricing[0].updatedSellingPrice).toBe(25);
+    expect(off2.productPricing[0].sellingPrice).toBe(25);
+
+    // 7. VERIFY PERFORMANCE REPORT: Profit / Loss calculation with updated price 25
+    const perfRes = await request(app)
+      .get(`/api/store-employee/offers/${offerId}/performance`)
+      .set('Authorization', `Bearer ${employeeToken}`);
+
+    expect(perfRes.status).toBe(200);
+    const perfItem = perfRes.body.data.productBreakdown.find((p) => p.barcode === 'PROOF_TEST_001');
+    expect(perfItem.purchasingPrice).toBe(140);
+    expect(perfItem.updatedSellingPrice).toBe(25);
+    expect(perfItem.profitPerUnit).toBe(-115); // 25 - 140 = -115 loss per unit
+    expect(perfItem.isUnitLoss).toBe(true);
+
+    // 8. VERIFY INVENTORY AGAIN: Catalog price still securely 140
+    const invResAfter = await request(app)
+      .get('/api/store-employee/products')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .query({ search: 'PROOF_TEST_001' });
+
+    expect(invResAfter.status).toBe(200);
+    const invItemAfter = invResAfter.body.data.find((p) => p.barcode === 'PROOF_TEST_001');
+    expect(invItemAfter.offlineSellingPrice).toBe(140);
+    expect(invItemAfter.promotionalSellingPrice).toBe(25);
+  });
 });
+

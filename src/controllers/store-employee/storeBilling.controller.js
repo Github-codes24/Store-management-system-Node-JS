@@ -535,7 +535,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       existingBill.discountType = finalDiscountType;
       existingBill.discountValue = finalDiscountValue;
       existingBill.discountAmount = finalDiscountAmount;
-      if (offerId) existingBill.offerId = offerId;
+      if (offerId || appliedOffer) existingBill.offerId = offerId || appliedOffer._id;
       existingBill.netAmount = calculatedNetAmount;
       existingBill.paymentStatus = calculatedPaymentStatus;
       existingBill.paymentMethod = primaryPaymentMethod;
@@ -597,7 +597,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       discountType: finalDiscountType,
       discountValue: finalDiscountValue,
       discountAmount: finalDiscountAmount,
-      offerId: offerId || null,
+      offerId: offerId || (appliedOffer ? appliedOffer._id : null),
       netAmount: calculatedNetAmount,
       paymentStatus: calculatedPaymentStatus,
       paymentMethod: primaryPaymentMethod,

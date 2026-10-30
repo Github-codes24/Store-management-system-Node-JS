@@ -9,6 +9,7 @@ import {
   getStoreOfferFormOptions,
   exportStoreOffers,
   getStoreBillingApplicableOffers,
+  getStoreOfferPerformanceReport,
 } from '../../controllers/store-employee/storeEmployee.offer.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
 import parseForm from '../../middlewares/parseForm.middleware.js';
@@ -28,6 +29,10 @@ router.get('/export', exportStoreOffers);
 router.get('/active', getStoreBillingApplicableOffers);
 router.get('/applicable-offers', getStoreBillingApplicableOffers);
 
+// Offer Performance / Analytics Report endpoints
+router.get('/:id/performance', getStoreOfferPerformanceReport);
+router.get('/:id/report', getStoreOfferPerformanceReport);
+router.get('/:id/analytics', getStoreOfferPerformanceReport);
 
 router
   .route('/')
