@@ -333,7 +333,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       autoComputedSubtotal += itemTotal;
 
       // Decrement stock from specific batch in storeProduct
-      const cleanBatch = itemBatch.replace(/\s*\(Offer:.*?\)/i, '').trim();
+      const cleanBatch = itemBatch.replace(/<[^>]*>/g, '').replace(/\s*[\(\[]Offer:.*?[\)\]]/gi, '').trim();
       if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
         let batchIndex = storeProd.batches.findIndex(
           (b) => (b.batchNumber || '').trim().toLowerCase() === cleanBatch.toLowerCase()
