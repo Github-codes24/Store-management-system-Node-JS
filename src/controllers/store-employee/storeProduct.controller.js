@@ -217,7 +217,7 @@ export const getStoreProducts = async (req, res, next) => {
       const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
       const effectiveOfflineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.offlineSellingPrice;
       const effectiveOnlineSp = (isBillingPage && hasOffer) ? promotionalSellingPrice : product.onlineSellingPrice;
-      const offerTag = (hasOffer && promoInfo.offerName) ? `<small style="font-size:7.5px;font-weight:400;display:block;line-height:1.1;margin-top:1px;color:#222;">(Offer: ${promoInfo.offerName})</small>` : '';
+      const offerTag = (hasOffer && promoInfo.offerName) ? `(Offer: ${promoInfo.offerName})` : '';
 
       const baseBatch = product.batch || (Array.isArray(product.batches) && product.batches.length > 0 ? product.batches[0].batchNumber : '');
       const effectiveBatch = (isBillingPage && hasOffer && offerTag)
@@ -359,7 +359,7 @@ export const getStoreProductById = async (req, res, next) => {
       : null;
 
     if (isBillingPage && hasOffer && promotionalSellingPrice > 0) {
-      const offerTag = promoInfo.offerName ? `<small style="font-size:7.5px;font-weight:400;display:block;line-height:1.1;margin-top:1px;color:#222;">(Offer: ${promoInfo.offerName})</small>` : '';
+      const offerTag = promoInfo.offerName ? `(Offer: ${promoInfo.offerName})` : '';
       if (offerTag) {
         product.batch = product.batch ? `${product.batch} ${offerTag}` : `Default Batch ${offerTag}`;
       }
@@ -1255,7 +1255,7 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
       : null;
 
     if (hasOffer && promotionalSellingPrice > 0) {
-      const offerTag = promoInfo.offerName ? `<small style="font-size:7.5px;font-weight:400;display:block;line-height:1.1;margin-top:1px;color:#222;">(Offer: ${promoInfo.offerName})</small>` : '';
+      const offerTag = promoInfo.offerName ? `(Offer: ${promoInfo.offerName})` : '';
       if (offerTag) {
         productData.batch = productData.batch ? `${productData.batch} ${offerTag}` : `Default Batch ${offerTag}`;
       }
