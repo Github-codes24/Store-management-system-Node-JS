@@ -1,3 +1,4 @@
+import { ensureEndOfDayIst, ensureStartOfDayIst } from './offerHelper.js';
 /**
  * Helper to safely parse multiple date formats (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, ISO, timestamp).
  * Returns a valid JavaScript Date or null. Never returns an Invalid Date object.

@@ -27,6 +27,30 @@ export const isOfferExpired = (validTo, now = new Date()) => {
   return effectiveEndOfValidTo < now;
 };
 
+
+/**
+ * Ensures validTo represents the end of the day in Indian Standard Time (23:59:59.999+05:30).
+ * Prevents client-side frontend code from miscalculating expiration when compared against new Date().
+ */
+export const ensureEndOfDayIst = (dateVal) => {
+  if (!dateVal) return dateVal;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return dateVal;
+  const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  return new Date(`${dateStr}T23:59:59.999+05:30`);
+};
+
+/**
+ * Ensures validFrom represents the start of the day in Indian Standard Time (00:00:00.000+05:30).
+ */
+export const ensureStartOfDayIst = (dateVal) => {
+  if (!dateVal) return dateVal;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return dateVal;
+  const dateStr = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  return new Date(`${dateStr}T00:00:00.000+05:30`);
+};
+
 export const isValidObjectId = (val) => {
   if (!val) return false;
   const str = typeof val === 'object' && val._id ? val._id.toString() : val.toString();

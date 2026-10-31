@@ -5,7 +5,7 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Category from '../../models/category.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
-import { enrichOffersWithProducts, buildOfferPerformanceData, isOfferExpired } from '../../utils/offerHelper.js';
+import { enrichOffersWithProducts, buildOfferPerformanceData, isOfferExpired, ensureEndOfDayIst, ensureStartOfDayIst } from '../../utils/offerHelper.js';
 import { getKolkataTodayRange } from '../../utils/timezone.js';
 import { getPagination } from '../../utils/pagination.js';
 
@@ -527,7 +527,7 @@ export const getStoreOffers = async (req, res, next) => {
         stores: off.stores,
         applyToAllStores: off.applyToAllStores,
         validFrom: off.validFrom,
-        validTo: off.validTo,
+        validTo: ensureEndOfDayIst(off.validTo),
         discountType: off.discountType,
         discountValue: off.discountValue,
         buyDetails: off.buyDetails,
@@ -593,6 +593,9 @@ export const getStoreOfferById = async (req, res, next) => {
     }
 
     const enrichedOffer = await enrichOffersWithProducts(offer);
+    if (enrichedOffer && enrichedOffer.validTo) {
+      enrichedOffer.validTo = ensureEndOfDayIst(enrichedOffer.validTo);
+    }
 
     const now = new Date();
     const isExpired = isOfferExpired(enrichedOffer.validTo, now);

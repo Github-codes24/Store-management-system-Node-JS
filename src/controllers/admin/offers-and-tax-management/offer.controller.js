@@ -264,7 +264,7 @@ export const getOffers = async (req, res, next) => {
         stores: off.stores,
         applyToAllStores: off.applyToAllStores,
         validFrom: off.validFrom,
-        validTo: off.validTo,
+        validTo: ensureEndOfDayIst(off.validTo),
         discountType: off.discountType,
         discountValue: off.discountValue,
         buyDetails: off.buyDetails,
