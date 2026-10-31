@@ -5,7 +5,8 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Category from '../../models/category.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
-import { enrichOffersWithProducts, buildOfferPerformanceData } from '../../utils/offerHelper.js';
+import { enrichOffersWithProducts, buildOfferPerformanceData, isOfferExpired } from '../../utils/offerHelper.js';
+import { getKolkataTodayRange } from '../../utils/timezone.js';
 import { getPagination } from '../../utils/pagination.js';
 
 /**
@@ -324,7 +325,7 @@ export const createStoreOffer = async (req, res, next) => {
     } = req.body;
 
     const fromDate = parseFlexibleDate(validFrom);
-    const toDate = parseFlexibleDate(validTo);
+    const toDate = parseFlexibleDate(validTo, true);
 
     if (!fromDate || !toDate) {
       return next(badRequest('Invalid validFrom or validTo date format. Please use DD/MM/YYYY or YYYY-MM-DD'));
@@ -501,7 +502,7 @@ export const getStoreOffers = async (req, res, next) => {
     const now = new Date();
 
     const formattedOffers = enrichedOffers.map((off) => {
-      const isExpired = new Date(off.validTo) < now;
+      const isExpired = isOfferExpired(off.validTo, now);
       const displayStatus = isExpired ? 'expired' : off.status;
       const productLabel = off.product || (off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product');
       const pushOfferTo = off.sendToAllCustomers
@@ -594,7 +595,7 @@ export const getStoreOfferById = async (req, res, next) => {
     const enrichedOffer = await enrichOffersWithProducts(offer);
 
     const now = new Date();
-    const isExpired = new Date(enrichedOffer.validTo) < now;
+    const isExpired = isOfferExpired(enrichedOffer.validTo, now);
     const displayStatus = isExpired ? 'expired' : enrichedOffer.status;
 
     const performanceReport = await buildOfferPerformanceData(offer, employeeStoreId);
@@ -673,7 +674,7 @@ export const updateStoreOffer = async (req, res, next) => {
       if (d) offer.validFrom = d;
     }
     if (updateData.validTo !== undefined) {
-      const d = parseFlexibleDate(updateData.validTo);
+      const d = parseFlexibleDate(updateData.validTo, true);
       if (d) offer.validTo = d;
     }
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
@@ -954,7 +955,7 @@ export const exportStoreOffers = async (req, res, next) => {
     const now = new Date();
 
     const exportData = enrichedOffers.map((off, index) => {
-      const isExpired = new Date(off.validTo) < now;
+      const isExpired = isOfferExpired(off.validTo, now);
       const statusLabel = isExpired ? 'Expired' : off.status.charAt(0).toUpperCase() + off.status.slice(1);
       const discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
 
@@ -989,8 +990,11 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
     const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store || req.query.storeId || null;
 
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const { start: todayStartIst, end: todayEndIst } = getKolkataTodayRange(now);
+    const startUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const endUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+    const startOfToday = new Date(Math.min(todayStartIst.getTime(), startUtc.getTime()));
+    const endOfToday = new Date(Math.max(todayEndIst.getTime(), endUtc.getTime()));
 
     const filter = {
       isDeleted: false,

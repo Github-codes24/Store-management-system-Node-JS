@@ -1,6 +1,31 @@
 import StoreProduct from '../models/storeProduct.model.js';
 import AdminProduct from '../models/adminProduct.model.js';
 import Category from '../models/category.model.js';
+import { getKolkataTodayRange } from './timezone.js';
+
+/**
+ * Check if an offer is expired based on validTo.
+ * An offer is valid throughout the entire day of validTo (until 23:59:59.999).
+ * If validTo was stored at midnight (00:00:00), we extend it to the end of that day.
+ */
+export const isOfferExpired = (validTo, now = new Date()) => {
+  if (!validTo) return false;
+  const toDate = new Date(validTo);
+  if (isNaN(toDate.getTime())) return false;
+
+  const endOfDayUtc = new Date(Date.UTC(
+    toDate.getUTCFullYear(),
+    toDate.getUTCMonth(),
+    toDate.getUTCDate(),
+    23, 59, 59, 999
+  ));
+
+  const kolkataDateStr = toDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const endOfDayIst = new Date(`${kolkataDateStr}T23:59:59.999+05:30`);
+
+  const effectiveEndOfValidTo = endOfDayIst > endOfDayUtc ? endOfDayIst : endOfDayUtc;
+  return effectiveEndOfValidTo < now;
+};
 
 export const isValidObjectId = (val) => {
   if (!val) return false;
@@ -380,8 +405,11 @@ export const enrichOffersWithProducts = async (rawOffers) => {
  */
 export const getActiveProductPricingMap = async (storeId = null) => {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const { start: todayStartIst, end: todayEndIst } = getKolkataTodayRange(now);
+  const startUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const endUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+  const startOfToday = new Date(Math.min(todayStartIst.getTime(), startUtc.getTime()));
+  const endOfToday = new Date(Math.max(todayEndIst.getTime(), endUtc.getTime()));
 
   const pricingMap = new Map();
 
@@ -476,7 +504,7 @@ export const buildOfferPerformanceData = async (offerDoc, storeId = null) => {
   const now = new Date();
   const validFromDate = offer.validFrom ? new Date(offer.validFrom) : null;
   const validToDate = offer.validTo ? new Date(offer.validTo) : null;
-  const isExpired = validToDate && validToDate < now;
+  const isExpired = isOfferExpired(offer.validTo, now);
   const isPaused = offer.status === 'inactive' && !isExpired;
   const displayStatus = isExpired ? 'Expired' : (offer.status === 'active' ? 'Active' : 'Inactive');
 

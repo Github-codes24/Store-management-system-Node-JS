@@ -212,8 +212,11 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     // Lookup active offer if offerId is provided or auto-detect active promotional pricing
     let appliedOffer = null;
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const { start: todayStartIst, end: todayEndIst } = getKolkataTodayRange(now);
+    const startUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const endUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+    const startOfToday = new Date(Math.min(todayStartIst.getTime(), startUtc.getTime()));
+    const endOfToday = new Date(Math.max(todayEndIst.getTime(), endUtc.getTime()));
 
     if (offerId) {
       try {
@@ -222,7 +225,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         if (appliedOffer) {
           if (appliedOffer.validFrom && new Date(appliedOffer.validFrom) > endOfToday) {
             appliedOffer = null;
-          } else if (appliedOffer.validTo && new Date(appliedOffer.validTo) < startOfToday) {
+          } else if (appliedOffer.validTo && isOfferExpired(appliedOffer.validTo, now)) {
             appliedOffer = null;
           }
         }

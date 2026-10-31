@@ -111,8 +111,8 @@ export const createOffer = async (req, res, next) => {
       status,
     } = req.body;
 
-    const fromDate = new Date(validFrom);
-    const toDate = new Date(validTo);
+    const fromDate = parseFlexibleDate(validFrom, false);
+    const toDate = parseFlexibleDate(validTo, true);
 
     if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
       return next(badRequest('Invalid validFrom or validTo date format'));
@@ -241,7 +241,7 @@ export const getOffers = async (req, res, next) => {
     const now = new Date();
 
     const formattedOffers = enrichedOffers.map((off) => {
-      const isExpired = new Date(off.validTo) < now;
+      const isExpired = isOfferExpired(off.validTo, now);
       const displayStatus = isExpired ? 'expired' : off.status;
       const productLabel = off.product || (off.products && off.products.length > 0 ? off.products.join(', ') : 'All Product');
       const pushOfferTo = off.sendToAllCustomers
@@ -331,7 +331,7 @@ export const getOfferById = async (req, res, next) => {
     const enrichedOffer = await enrichOffersWithProducts(offer);
 
     const now = new Date();
-    const isExpired = new Date(enrichedOffer.validTo) < now;
+    const isExpired = isOfferExpired(enrichedOffer.validTo, now);
     const displayStatus = isExpired ? 'expired' : enrichedOffer.status;
 
     return res.status(200).json(
@@ -370,8 +370,8 @@ export const updateOffer = async (req, res, next) => {
     if (updateData.offersOn !== undefined) offer.offersOn = updateData.offersOn;
     if (updateData.stores !== undefined) offer.stores = updateData.stores;
     if (updateData.applyToAllStores !== undefined) offer.applyToAllStores = updateData.applyToAllStores;
-    if (updateData.validFrom !== undefined) offer.validFrom = new Date(updateData.validFrom);
-    if (updateData.validTo !== undefined) offer.validTo = new Date(updateData.validTo);
+    if (updateData.validFrom !== undefined) offer.validFrom = parseFlexibleDate(updateData.validFrom, false);
+    if (updateData.validTo !== undefined) offer.validTo = parseFlexibleDate(updateData.validTo, true);
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
@@ -519,7 +519,7 @@ export const exportOffers = async (_req, res, next) => {
     const now = new Date();
 
     const exportData = enrichedOffers.map((off, index) => {
-      const isExpired = new Date(off.validTo) < now;
+      const isExpired = isOfferExpired(off.validTo, now);
       const statusLabel = isExpired ? 'Expired' : off.status.charAt(0).toUpperCase() + off.status.slice(1);
       const discountLabel = off.discountType === 'percentage' ? `${off.discountValue}%` : `₹ ${off.discountValue}`;
 
