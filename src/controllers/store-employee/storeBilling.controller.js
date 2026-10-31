@@ -7,7 +7,8 @@ import { createCustomerNotificationHelper } from '../customer/customerNotificati
 import { syncCustomerMetricsInDb, isWalkInCustomer } from '../../utils/customerMetrics.util.js';
 import razorpayInstance from '../../config/razorpay.js';
 import env from '../../config/env.js';
-import { getActiveProductPricingMap } from '../../utils/offerHelper.js';
+import { getActiveProductPricingMap, isOfferExpired } from '../../utils/offerHelper.js';
+import { getKolkataTodayRange } from '../../utils/timezone.js';
 
 /**
  * Auto-generate a clean sequential Order ID in the backend (e.g. SODR00001 for Offline, OODR00001 for Online).
