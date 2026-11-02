@@ -7,7 +7,7 @@ import ProductType from '../../../models/productType.model.js';
 import { successResponse } from '../../../utils/api-response.js';
 import { notFound, badRequest } from '../../../utils/api-error.js';
 import { getPagination } from '../../../utils/pagination.js';
-import { enrichOffersWithProducts, isOfferExpired, ensureEndOfDayIst } from '../../../utils/offerHelper.js';
+import { enrichOffersWithProducts, isOfferExpired, ensureEndOfDayIst, resolveProductDocument, sanitizeProductIds, isValidObjectId } from '../../../utils/offerHelper.js';
 import { parseFlexibleDate } from '../../../utils/date.util.js';
 
 /**
@@ -126,14 +126,11 @@ export const createOffer = async (req, res, next) => {
     let validatedProductPricing = [];
     if (Array.isArray(productPricing) && productPricing.length > 0) {
       for (const item of productPricing) {
-        const prodId = item.product || item.productId || item.id || item._id;
-        if (!prodId) continue;
+        const rawProdId = item.product || item.productId || item.id || item._id;
+        if (!rawProdId) continue;
 
-        let prod = await AdminProduct.findById(prodId).lean();
-        if (!prod) {
-          const StoreProduct = (await import('../../../models/storeProduct.model.js')).default;
-          prod = await StoreProduct.findById(prodId).lean();
-        }
+        const prod = await resolveProductDocument(rawProdId);
+        if (!prod) continue;
 
         const prodName = prod?.productName || prod?.name || item.productName || 'Product';
         const realMrp = Number(prod?.mrp !== undefined ? prod.mrp : (item.mrp || 0));
@@ -153,7 +150,7 @@ export const createOffer = async (req, res, next) => {
         }
 
         validatedProductPricing.push({
-          product: prodId,
+          product: prod._id,
           productName: prodName,
           barcode: prod?.barcode || item.barcode || '',
           mrp: realMrp,
@@ -163,11 +160,12 @@ export const createOffer = async (req, res, next) => {
       }
     }
 
-    let resolvedProducts = Array.isArray(products) ? [...products] : [];
+    let resolvedProducts = await sanitizeProductIds(products);
     if (validatedProductPricing.length > 0) {
       const pricingIds = validatedProductPricing.map((pp) => pp.product.toString());
       resolvedProducts = Array.from(new Set([...resolvedProducts, ...pricingIds]));
     }
+    resolvedProducts = Array.from(new Set(resolvedProducts.filter(isValidObjectId)));
 
     const offer = await Offer.create({
       name: name.trim(),
@@ -376,20 +374,19 @@ export const updateOffer = async (req, res, next) => {
     if (updateData.discountType !== undefined) offer.discountType = updateData.discountType;
     if (updateData.discountValue !== undefined) offer.discountValue = Number(updateData.discountValue);
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
-    if (updateData.products !== undefined) offer.products = updateData.products;
+    if (updateData.products !== undefined) {
+      offer.products = await sanitizeProductIds(updateData.products);
+    }
 
     if (updateData.productPricing !== undefined) {
       if (Array.isArray(updateData.productPricing)) {
         let validatedPricing = [];
         for (const item of updateData.productPricing) {
-          const prodId = item.product || item.productId || item.id || item._id;
-          if (!prodId) continue;
+          const rawProdId = item.product || item.productId || item.id || item._id;
+          if (!rawProdId) continue;
 
-          let prod = await AdminProduct.findById(prodId).lean();
-          if (!prod) {
-            const StoreProduct = (await import('../../../models/storeProduct.model.js')).default;
-            prod = await StoreProduct.findById(prodId).lean();
-          }
+          const prod = await resolveProductDocument(rawProdId);
+          if (!prod) continue;
 
           const prodName = prod?.productName || prod?.name || item.productName || 'Product';
           const realMrp = Number(prod?.mrp !== undefined ? prod.mrp : (item.mrp || 0));
@@ -409,7 +406,7 @@ export const updateOffer = async (req, res, next) => {
           }
 
           validatedPricing.push({
-            product: prodId,
+            product: prod._id,
             productName: prodName,
             barcode: prod?.barcode || item.barcode || '',
             mrp: realMrp,
@@ -426,6 +423,10 @@ export const updateOffer = async (req, res, next) => {
           offer.offerType = 'special';
         }
       }
+    }
+
+    if (Array.isArray(offer.products)) {
+      offer.products = Array.from(new Set(offer.products.filter(isValidObjectId)));
     }
 
     if (updateData.sendToAllCustomers !== undefined) offer.sendToAllCustomers = updateData.sendToAllCustomers;

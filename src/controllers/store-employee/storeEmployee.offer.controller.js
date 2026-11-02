@@ -5,7 +5,7 @@ import StoreProduct from '../../models/storeProduct.model.js';
 import Category from '../../models/category.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { notFound, badRequest } from '../../utils/api-error.js';
-import { enrichOffersWithProducts, buildOfferPerformanceData, isOfferExpired, ensureEndOfDayIst, ensureStartOfDayIst } from '../../utils/offerHelper.js';
+import { enrichOffersWithProducts, buildOfferPerformanceData, isOfferExpired, ensureEndOfDayIst, ensureStartOfDayIst, resolveProductDocument, sanitizeProductIds, isValidObjectId } from '../../utils/offerHelper.js';
 import { getKolkataTodayRange } from '../../utils/timezone.js';
 import { getPagination } from '../../utils/pagination.js';
 
@@ -339,14 +339,13 @@ export const createStoreOffer = async (req, res, next) => {
     let validatedProductPricing = [];
     if (Array.isArray(productPricing) && productPricing.length > 0) {
       for (const item of productPricing) {
-        const prodId = item.product || item.productId || item.id || item._id;
-        if (!prodId) continue;
+        const rawProdId = item.product || item.productId || item.id || item._id;
+        if (!rawProdId) continue;
 
-        let storeProd = await StoreProduct.findById(prodId).lean();
-        if (!storeProd) {
-          storeProd = await AdminProduct.findById(prodId).lean();
-        }
+        const storeProd = await resolveProductDocument(rawProdId, employeeStoreId);
+        if (!storeProd) continue;
 
+        const prodId = storeProd._id.toString();
         const prodName = storeProd?.productName || storeProd?.name || item.productName || 'Product';
         const realMrp = Number(storeProd?.mrp !== undefined ? storeProd.mrp : (item.mrp || 0));
         const originalSp = Number(
@@ -375,7 +374,7 @@ export const createStoreOffer = async (req, res, next) => {
         }
 
         validatedProductPricing.push({
-          product: prodId,
+          product: storeProd._id,
           productName: prodName,
           barcode: storeProd?.barcode || item.barcode || '',
           mrp: realMrp,
@@ -386,7 +385,9 @@ export const createStoreOffer = async (req, res, next) => {
     }
 
     if (buyDetails && buyDetails.buyProduct) {
-      const bProdId = (buyDetails.buyProduct._id || buyDetails.buyProduct.id || buyDetails.buyProduct).toString();
+      const bProduct = buyDetails.buyProduct._id || buyDetails.buyProduct.id || buyDetails.buyProduct;
+      const bDoc = await resolveProductDocument(bProduct, employeeStoreId);
+      const bProdId = bDoc ? bDoc._id.toString() : (isValidObjectId(bProduct) ? bProduct.toString() : null);
       const bRawPrice = buyDetails.updatedSellingPrice !== undefined
         ? buyDetails.updatedSellingPrice
         : (buyDetails.offerBasePrice !== undefined
@@ -398,27 +399,30 @@ export const createStoreOffer = async (req, res, next) => {
         if (existingIdx >= 0) {
           validatedProductPricing[existingIdx].updatedSellingPrice = Number(bRawPrice);
         } else {
-          let storeProd = await StoreProduct.findById(bProdId).lean() || await AdminProduct.findById(bProdId).lean();
-          const prodName = storeProd?.productName || storeProd?.name || 'Product';
-          const realMrp = Number(storeProd?.mrp || 0);
-          const originalSp = Number(storeProd?.offlineSellingPrice !== undefined ? storeProd.offlineSellingPrice : (storeProd?.sellingPrice || realMrp));
-          validatedProductPricing.push({
-            product: bProdId,
-            productName: prodName,
-            barcode: storeProd?.barcode || '',
-            mrp: realMrp,
-            originalSellingPrice: originalSp,
-            updatedSellingPrice: Number(bRawPrice),
-          });
+          const storeProd = bDoc || await resolveProductDocument(bProdId, employeeStoreId);
+          if (storeProd) {
+            const prodName = storeProd?.productName || storeProd?.name || 'Product';
+            const realMrp = Number(storeProd?.mrp || 0);
+            const originalSp = Number(storeProd?.offlineSellingPrice !== undefined ? storeProd.offlineSellingPrice : (storeProd?.sellingPrice || realMrp));
+            validatedProductPricing.push({
+              product: storeProd._id,
+              productName: prodName,
+              barcode: storeProd?.barcode || '',
+              mrp: realMrp,
+              originalSellingPrice: originalSp,
+              updatedSellingPrice: Number(bRawPrice),
+            });
+          }
         }
       }
     }
 
-    let resolvedProducts = Array.isArray(products) ? [...products] : [];
+    let resolvedProducts = await sanitizeProductIds(products, employeeStoreId);
     if (validatedProductPricing.length > 0) {
       const pricingIds = validatedProductPricing.map((pp) => pp.product.toString());
       resolvedProducts = Array.from(new Set([...resolvedProducts, ...pricingIds]));
     }
+    resolvedProducts = Array.from(new Set(resolvedProducts.filter(isValidObjectId)));
 
     const resolvedAppliesTo = (appliesTo === 'all' && resolvedProducts.length > 0)
       ? 'product'
@@ -662,6 +666,7 @@ export const updateStoreOffer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
+    const employeeStoreId = req.storeEmployee?.storeId || req.storeEmployee?.store;
 
     const offer = await Offer.findOne({ _id: id, isDeleted: false });
     if (!offer) {
@@ -687,7 +692,8 @@ export const updateStoreOffer = async (req, res, next) => {
     let bProdId = null;
     if (updateData.buyDetails !== undefined) {
       const bProduct = updateData.buyDetails.buyProduct || updateData.buyDetails.product || updateData.buyDetails.productId;
-      bProdId = bProduct ? (bProduct._id || bProduct.id || bProduct).toString() : null;
+      const bDoc = await resolveProductDocument(bProduct, employeeStoreId);
+      bProdId = bDoc ? bDoc._id.toString() : (isValidObjectId(bProduct) ? bProduct.toString() : null);
       offer.buyDetails = {
         buyProduct: bProdId || null,
         buyQuantity: Number(updateData.buyDetails.buyQuantity) || 1,
@@ -729,7 +735,8 @@ export const updateStoreOffer = async (req, res, next) => {
     let fProdId = null;
     if (updateData.getFreeDetails !== undefined) {
       const fProduct = updateData.getFreeDetails.freeProduct || updateData.getFreeDetails.product || updateData.getFreeDetails.productId;
-      fProdId = fProduct ? (fProduct._id || fProduct.id || fProduct).toString() : null;
+      const fDoc = await resolveProductDocument(fProduct, employeeStoreId);
+      fProdId = fDoc ? fDoc._id.toString() : (isValidObjectId(fProduct) ? fProduct.toString() : null);
       offer.getFreeDetails = {
         freeProduct: fProdId || null,
         freeQuantity: Number(updateData.getFreeDetails.freeQuantity) || 1,
@@ -768,20 +775,21 @@ export const updateStoreOffer = async (req, res, next) => {
     }
 
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
-    if (updateData.products !== undefined) offer.products = updateData.products;
+    if (updateData.products !== undefined) {
+      offer.products = await sanitizeProductIds(updateData.products, employeeStoreId);
+    }
 
     if (updateData.productPricing !== undefined) {
       if (Array.isArray(updateData.productPricing)) {
         let validatedPricing = [];
         for (const item of updateData.productPricing) {
-          const prodId = item.product || item.productId || item.id || item._id;
-          if (!prodId) continue;
+          const rawProdId = item.product || item.productId || item.id || item._id;
+          if (!rawProdId) continue;
 
-          let storeProd = await StoreProduct.findById(prodId).lean();
-          if (!storeProd) {
-            storeProd = await AdminProduct.findById(prodId).lean();
-          }
+          const storeProd = await resolveProductDocument(rawProdId, employeeStoreId);
+          if (!storeProd) continue;
 
+          const prodId = storeProd._id.toString();
           const prodName = storeProd?.productName || storeProd?.name || item.productName || 'Product';
           const realMrp = Number(storeProd?.mrp !== undefined ? storeProd.mrp : (item.mrp || 0));
           const originalSp = Number(
@@ -826,7 +834,7 @@ export const updateStoreOffer = async (req, res, next) => {
           }
 
           validatedPricing.push({
-            product: prodId,
+            product: storeProd._id,
             productName: prodName,
             barcode: storeProd?.barcode || item.barcode || '',
             mrp: realMrp,
@@ -839,15 +847,17 @@ export const updateStoreOffer = async (req, res, next) => {
         if (bProdId && buyUpdatedSp !== undefined) {
           const hasBProd = validatedPricing.some((pp) => String(pp.product) === String(bProdId));
           if (!hasBProd) {
-            let storeProd = await StoreProduct.findById(bProdId).lean() || await AdminProduct.findById(bProdId).lean();
-            validatedPricing.push({
-              product: bProdId,
-              productName: storeProd?.productName || storeProd?.name || 'Product A',
-              barcode: storeProd?.barcode || '',
-              mrp: Number(storeProd?.mrp || 0),
-              originalSellingPrice: Number(storeProd?.offlineSellingPrice || storeProd?.sellingPrice || 0),
-              updatedSellingPrice: buyUpdatedSp,
-            });
+            const storeProd = await resolveProductDocument(bProdId, employeeStoreId);
+            if (storeProd) {
+              validatedPricing.push({
+                product: storeProd._id,
+                productName: storeProd?.productName || storeProd?.name || 'Product A',
+                barcode: storeProd?.barcode || '',
+                mrp: Number(storeProd?.mrp || 0),
+                originalSellingPrice: Number(storeProd?.offlineSellingPrice || storeProd?.sellingPrice || 0),
+                updatedSellingPrice: buyUpdatedSp,
+              });
+            }
           }
         }
 
@@ -859,6 +869,10 @@ export const updateStoreOffer = async (req, res, next) => {
           offer.offerType = 'special';
         }
       }
+    }
+
+    if (Array.isArray(offer.products)) {
+      offer.products = Array.from(new Set(offer.products.filter(isValidObjectId)));
     }
 
     if (updateData.sendToAllCustomers !== undefined) offer.sendToAllCustomers = updateData.sendToAllCustomers;

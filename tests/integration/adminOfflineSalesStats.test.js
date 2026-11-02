@@ -42,109 +42,74 @@ beforeAll(async () => {
   const now = new Date();
   const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
 
-  // Order 1: Store 1, created today, 500 cash, 1200 upi
-  await StoreOrder.create({
-    orderId: 'SODR10001',
-    store: store1._id,
-    orderStatus: 'Completed',
-    totalOrderNet: 1700,
-    totalOrderPaid: 1700,
-    payments: [
-      { mode: 'cash', amount: 500 },
-      { mode: 'upi', amount: 1200 },
-    ],
-    bills: [
-      {
-        billId: 'BILL10001',
-        saleType: 'Offline',
-        netAmount: 1700,
-        paidAmount: 1700,
-        payments: [
-          { mode: 'cash', amount: 500 },
-          { mode: 'upi', amount: 1200 },
-        ],
+  const makeOrder = (orderId, storeId, total, date, paymentsList) => {
+    return {
+      orderId,
+      store: storeId,
+      orderStatus: 'Completed',
+      customer: {
+        name: 'Walk-in Customer',
+        phone: '9876543210',
       },
-    ],
-    createdAt: now,
-  });
+      totalOrderNet: total,
+      totalOrderPaid: total,
+      payments: paymentsList,
+      bills: [
+        {
+          billId: `BILL_${orderId}`,
+          saleType: 'Offline',
+          subtotal: total,
+          netAmount: total,
+          paidAmount: total,
+          paymentMethod: 'Split',
+          payments: paymentsList,
+          items: [
+            {
+              product: new mongoose.Types.ObjectId(),
+              productName: 'Sample Item',
+              quantity: 1,
+              price: total,
+              sellingPrice: total,
+              totalAmount: total,
+            },
+          ],
+        },
+      ],
+      createdAt: date,
+    };
+  };
+
+  // Order 1: Store 1, created today, 500 cash, 1200 upi
+  await StoreOrder.create(
+    makeOrder('SODR10001', store1._id, 1700, now, [
+      { mode: 'Cash', amount: 500 },
+      { mode: 'UPI', amount: 1200 },
+    ])
+  );
 
   // Order 2: Store 1, created today, 300 cash, 200 card
-  await StoreOrder.create({
-    orderId: 'SODR10002',
-    store: store1._id,
-    orderStatus: 'Completed',
-    totalOrderNet: 500,
-    totalOrderPaid: 500,
-    payments: [
-      { mode: 'cash', amount: 300 },
-      { mode: 'card', amount: 200 },
-    ],
-    bills: [
-      {
-        billId: 'BILL10002',
-        saleType: 'Offline',
-        netAmount: 500,
-        paidAmount: 500,
-        payments: [
-          { mode: 'cash', amount: 300 },
-          { mode: 'card', amount: 200 },
-        ],
-      },
-    ],
-    createdAt: now,
-  });
+  await StoreOrder.create(
+    makeOrder('SODR10002', store1._id, 500, now, [
+      { mode: 'Cash', amount: 300 },
+      { mode: 'Card', amount: 200 },
+    ])
+  );
 
   // Order 3: Store 1, created 5 days ago, 1000 cash, 2000 upi
-  await StoreOrder.create({
-    orderId: 'SODR10003',
-    store: store1._id,
-    orderStatus: 'Completed',
-    totalOrderNet: 3000,
-    totalOrderPaid: 3000,
-    payments: [
-      { mode: 'cash', amount: 1000 },
-      { mode: 'upi', amount: 2000 },
-    ],
-    bills: [
-      {
-        billId: 'BILL10003',
-        saleType: 'Offline',
-        netAmount: 3000,
-        paidAmount: 3000,
-        payments: [
-          { mode: 'cash', amount: 1000 },
-          { mode: 'upi', amount: 2000 },
-        ],
-      },
-    ],
-    createdAt: fiveDaysAgo,
-  });
+  await StoreOrder.create(
+    makeOrder('SODR10003', store1._id, 3000, fiveDaysAgo, [
+      { mode: 'Cash', amount: 1000 },
+      { mode: 'UPI', amount: 2000 },
+    ])
+  );
 
   // Order 4: Store 2, created today, 400 cash, 600 upi
-  await StoreOrder.create({
-    orderId: 'SODR10004',
-    store: store2._id,
-    orderStatus: 'Completed',
-    totalOrderNet: 1000,
-    totalOrderPaid: 1000,
-    payments: [
-      { mode: 'cash', amount: 400 },
-      { mode: 'upi', amount: 600 },
-    ],
-    bills: [
-      {
-        billId: 'BILL10004',
-        saleType: 'Offline',
-        netAmount: 1000,
-        paidAmount: 1000,
-        payments: [
-          { mode: 'cash', amount: 400 },
-          { mode: 'upi', amount: 600 },
-        ],
-      },
-    ],
-    createdAt: now,
-  });
+  await StoreOrder.create(
+    makeOrder('SODR10004', store2._id, 1000, now, [
+      { mode: 'Cash', amount: 400 },
+      { mode: 'UPI', amount: 600 },
+    ])
+  );
 });
 
 afterAll(async () => {
@@ -212,7 +177,7 @@ describe('GET /api/admin/orders/offline - Today Cash and Today UPI Stats', () =>
     expect(res.body.success).toBe(true);
 
     // Order 3 (created 5 days ago) must be excluded from today orders list
-    expect(res.body.pagination.total).toBe(3);
+    expect(res.body.pagination.totalItems).toBe(3);
     expect(res.body.data.length).toBe(3);
     const orderIds = res.body.data.map((o) => o.orderId);
     expect(orderIds).not.toContain('SODR10003');

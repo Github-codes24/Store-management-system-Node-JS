@@ -67,6 +67,110 @@ export const extractIdString = (val) => {
 };
 
 /**
+ * Safely resolves a product reference (which may be an ObjectId, an object {_id},
+ * a product name, barcode, or a comma-separated string) to a real StoreProduct or AdminProduct.
+ * Never throws a CastError.
+ */
+export const resolveProductDocument = async (raw, storeId = null) => {
+  if (!raw) return null;
+  const rawStr = extractIdString(raw);
+  if (!rawStr) return null;
+
+  // Handle case where comma-separated names or IDs were concatenated (e.g. "Test Product, Test Product")
+  const primaryTerm = rawStr.split(',')[0].trim();
+  if (!primaryTerm) return null;
+
+  // 1. If it is already a valid 24-character hex ObjectId
+  if (isValidObjectId(primaryTerm)) {
+    let prod = null;
+    if (storeId && isValidObjectId(storeId)) {
+      prod = await StoreProduct.findOne({ _id: primaryTerm, storeId }).lean();
+    }
+    if (!prod) {
+      prod = await StoreProduct.findById(primaryTerm).lean();
+    }
+    if (!prod) {
+      prod = await AdminProduct.findById(primaryTerm).lean();
+    }
+    if (prod) return prod;
+  }
+
+  // 2. If not a valid ObjectId or not found by ID, search by exact productName or barcode
+  const searchFilter = {
+    $or: [
+      { productName: primaryTerm },
+      { barcode: primaryTerm },
+      { name: primaryTerm },
+    ],
+  };
+
+  let prod = null;
+  if (storeId && isValidObjectId(storeId)) {
+    prod = await StoreProduct.findOne({ ...searchFilter, storeId }).lean();
+  }
+  if (!prod) {
+    prod = await StoreProduct.findOne(searchFilter).lean();
+  }
+  if (!prod) {
+    prod = await AdminProduct.findOne(searchFilter).lean();
+  }
+
+  // 3. Case-insensitive fallback if exact match wasn't found
+  if (!prod) {
+    const escaped = primaryTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regexFilter = {
+      $or: [
+        { productName: { $regex: new RegExp(`^${escaped}$`, 'i') } },
+        { barcode: primaryTerm },
+        { name: { $regex: new RegExp(`^${escaped}$`, 'i') } },
+      ],
+    };
+    if (storeId && isValidObjectId(storeId)) {
+      prod = await StoreProduct.findOne({ ...regexFilter, storeId }).lean();
+    }
+    if (!prod) {
+      prod = await StoreProduct.findOne(regexFilter).lean();
+    }
+    if (!prod) {
+      prod = await AdminProduct.findOne(regexFilter).lean();
+    }
+  }
+
+  return prod;
+};
+
+/**
+ * Sanitizes an array of products (which may contain ObjectIds, product names, or comma-separated strings)
+ * and resolves them to an array of unique, valid 24-hex ObjectId strings.
+ */
+export const sanitizeProductIds = async (rawProducts, storeId = null) => {
+  if (!rawProducts) return [];
+  const list = Array.isArray(rawProducts) ? rawProducts : [rawProducts];
+  const validIds = new Set();
+
+  for (const item of list) {
+    if (!item) continue;
+    const parts = String(extractIdString(item) || item)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    for (const part of parts) {
+      if (isValidObjectId(part)) {
+        validIds.add(part.toString());
+      } else {
+        const doc = await resolveProductDocument(part, storeId);
+        if (doc && doc._id) {
+          validIds.add(doc._id.toString());
+        }
+      }
+    }
+  }
+
+  return Array.from(validIds);
+};
+
+/**
  * Enriches offer documents by resolving buyProduct, freeProduct, and products array
  * into human-readable product names and structured objects, falling back to StoreProduct,
  * AdminProduct, or Category as needed.
@@ -347,6 +451,7 @@ export const enrichOffersWithProducts = async (rawOffers) => {
     // Resolve products array
     const resolvedProductNames = [];
     const resolvedProducts = [];
+    const seenProductIds = new Set();
 
     if (Array.isArray(item.products)) {
       item.products.forEach((p) => {
@@ -364,23 +469,52 @@ export const enrichOffersWithProducts = async (rawOffers) => {
           ? Number(pricingInfo.updatedSellingPrice)
           : originalSellingPrice;
 
-        resolvedProducts.push({
-          _id: isValidObjectId(pId) ? pId : (p._id || null),
-          id: pId || p,
-          productName: name,
-          name,
-          barcode: baseInfo.barcode || (typeof p === 'object' ? p.barcode : '') || '',
-          mrp,
-          originalSellingPrice,
-          offlineSellingPrice: originalSellingPrice,
-          updatedSellingPrice,
-          sellingPrice: updatedSellingPrice,
-          price: updatedSellingPrice,
-          offerBasePrice: updatedSellingPrice,
-          promotionalSellingPrice: updatedSellingPrice,
-          type: baseInfo.type || 'product',
-        });
-        resolvedProductNames.push(name);
+        const normalizedName = String(name || '').trim().toLowerCase();
+        const existingIdx = resolvedProducts.findIndex(
+          (rp) => (isValidObjectId(pId) && isValidObjectId(rp.id) && String(rp.id) === String(pId)) ||
+                  (normalizedName && String(rp.name || '').trim().toLowerCase() === normalizedName)
+        );
+
+        if (existingIdx >= 0) {
+          // If the existing entry had null _id but current entry has a valid _id, merge and enrich it
+          if (!resolvedProducts[existingIdx]._id && isValidObjectId(pId)) {
+            resolvedProducts[existingIdx] = {
+              ...resolvedProducts[existingIdx],
+              _id: pId,
+              id: pId,
+              barcode: baseInfo.barcode || resolvedProducts[existingIdx].barcode || '',
+              mrp: mrp || resolvedProducts[existingIdx].mrp,
+              originalSellingPrice: originalSellingPrice || resolvedProducts[existingIdx].originalSellingPrice,
+              offlineSellingPrice: originalSellingPrice || resolvedProducts[existingIdx].offlineSellingPrice,
+              updatedSellingPrice: updatedSellingPrice || resolvedProducts[existingIdx].updatedSellingPrice,
+              sellingPrice: updatedSellingPrice || resolvedProducts[existingIdx].sellingPrice,
+              price: updatedSellingPrice || resolvedProducts[existingIdx].price,
+              offerBasePrice: updatedSellingPrice || resolvedProducts[existingIdx].offerBasePrice,
+              promotionalSellingPrice: updatedSellingPrice || resolvedProducts[existingIdx].promotionalSellingPrice,
+            };
+          }
+        } else {
+          resolvedProducts.push({
+            _id: isValidObjectId(pId) ? pId : (p._id || null),
+            id: pId || p,
+            productName: name,
+            name,
+            barcode: baseInfo.barcode || (typeof p === 'object' ? p.barcode : '') || '',
+            mrp,
+            originalSellingPrice,
+            offlineSellingPrice: originalSellingPrice,
+            updatedSellingPrice,
+            sellingPrice: updatedSellingPrice,
+            price: updatedSellingPrice,
+            offerBasePrice: updatedSellingPrice,
+            promotionalSellingPrice: updatedSellingPrice,
+            type: baseInfo.type || 'product',
+          });
+        }
+
+        if (name && !resolvedProductNames.includes(name)) {
+          resolvedProductNames.push(name);
+        }
       });
     }
 
