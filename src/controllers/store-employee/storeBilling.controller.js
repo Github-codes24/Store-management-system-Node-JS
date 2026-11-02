@@ -120,6 +120,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       dueAmount = 0,
       payments = [],
       offerId = null,
+      tenderedAmount = null,
+      changeReturn = null,
     } = req.body;
 
     const customerObj = (customer && typeof customer === 'object') ? customer : {
@@ -536,6 +538,62 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       ];
     }
 
+    // Validate non-cash digital payments (UPI, Card, Net Banking, Wallet)
+    const nonCashPayments = processedPayments.filter(
+      (p) => (p.mode || '').trim().toLowerCase() !== 'cash'
+    );
+    const totalNonCash = nonCashPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    if (totalNonCash > finalNetAmount) {
+      return next(
+        badRequest(
+          `UPI/Card payment amount (₹${totalNonCash}) cannot exceed Net Payable amount (₹${finalNetAmount}). Cash change cannot be issued for digital payments.`
+        )
+      );
+    }
+
+    // Calculate Cash tendered vs remaining net amount due for cash
+    const cashDue = Math.max(0, finalNetAmount - totalNonCash);
+    const rawCashPayments = processedPayments.filter(
+      (p) => (p.mode || '').trim().toLowerCase() === 'cash'
+    );
+    const rawCashTendered = rawCashPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    const explicitTendered = parseFloat(tenderedAmount);
+    const hasExplicitTendered = !isNaN(explicitTendered) && explicitTendered > 0;
+
+    let calculatedTenderedAmount = hasExplicitTendered
+      ? explicitTendered
+      : Math.round((rawCashTendered + totalNonCash) * 100) / 100;
+
+    let calculatedChangeReturn = 0;
+
+    if (rawCashTendered > cashDue) {
+      // Cashier entered extra cash tendered (e.g. entered 1200 on a 114 bill or 500 on a 200 bill)
+      calculatedChangeReturn = Math.round((rawCashTendered - cashDue) * 100) / 100;
+      calculatedTenderedAmount = Math.round((rawCashTendered + totalNonCash) * 100) / 100;
+
+      // Cap the recorded cash payment in processedPayments to cashDue so drawer and revenue stay 100% accurate
+      let remainingCashCap = cashDue;
+      processedPayments = processedPayments.map((p) => {
+        if ((p.mode || '').trim().toLowerCase() === 'cash') {
+          const capAmt = Math.min(Number(p.amount) || 0, remainingCashCap);
+          remainingCashCap = Math.max(0, remainingCashCap - capAmt);
+          return {
+            ...p,
+            amount: capAmt,
+            description: p.description
+              ? `${p.description} (Tendered: ₹${rawCashTendered}, Change: ₹${calculatedChangeReturn})`
+              : `Cash Tendered: ₹${rawCashTendered}, Change: ₹${calculatedChangeReturn}`,
+          };
+        }
+        return p;
+      });
+    } else if (hasExplicitTendered && calculatedTenderedAmount > finalNetAmount) {
+      // Frontend already capped payment array and sent explicit tenderedAmount
+      calculatedChangeReturn = Math.round((calculatedTenderedAmount - finalNetAmount) * 100) / 100;
+    }
+
     const calculatedPaidAmount = processedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     const calculatedNetAmount = finalNetAmount;
     const calculatedDueAmount = Math.max(0, calculatedNetAmount - calculatedPaidAmount);
@@ -571,12 +629,16 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       existingBill.paymentMethod = primaryPaymentMethod;
       existingBill.paidAmount = calculatedPaidAmount;
       existingBill.dueAmount = calculatedDueAmount;
+      existingBill.tenderedAmount = calculatedTenderedAmount;
+      existingBill.changeReturn = calculatedChangeReturn;
       existingBill.payments = processedPayments;
       if (saleType) existingBill.saleType = saleType;
 
       order.totalOrderGross = order.bills.reduce((sum, b) => sum + (b.grossAmount || 0), 0);
       order.totalOrderNet = order.bills.reduce((sum, b) => sum + (b.netAmount || 0), 0);
       order.totalOrderPaid = order.bills.reduce((sum, b) => sum + (b.paidAmount || 0), 0);
+      order.totalOrderTendered = order.bills.reduce((sum, b) => sum + (b.tenderedAmount || b.paidAmount || 0), 0);
+      order.totalOrderChangeReturn = order.bills.reduce((sum, b) => sum + (b.changeReturn || 0), 0);
       order.payments = order.bills.flatMap((b) => b.payments || []);
       order.markModified('bills');
       order.markModified('customer');
@@ -601,6 +663,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
             orderId: existingBill.orderId || order.orderId,
             sessionOrderId: order.orderId,
             billId: existingBill.billId,
+            tenderedAmount: calculatedTenderedAmount,
+            changeReturn: calculatedChangeReturn,
           },
         })
       );
@@ -634,6 +698,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       paymentMethod: primaryPaymentMethod,
       paidAmount: calculatedPaidAmount,
       dueAmount: calculatedDueAmount,
+      tenderedAmount: calculatedTenderedAmount,
+      changeReturn: calculatedChangeReturn,
       payments: processedPayments,
     };
 
@@ -672,6 +738,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
             totalOrderGross: newBill.grossAmount,
             totalOrderNet: newBill.netAmount,
             totalOrderPaid: calculatedPaidAmount,
+            totalOrderTendered: calculatedTenderedAmount,
+            totalOrderChangeReturn: calculatedChangeReturn,
             totalOrderRefunded: 0,
             orderStatus: isOnline ? 'New' : 'Completed',
           });
@@ -709,6 +777,8 @@ export const createOrAppendOrderBill = async (req, res, next) => {
           orderId: thisBillOrderId,
           sessionOrderId: order.orderId,
           billId: newBill.billId,
+          tenderedAmount: calculatedTenderedAmount,
+          changeReturn: calculatedChangeReturn,
         },
       })
     );

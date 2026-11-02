@@ -261,6 +261,16 @@ const billSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    tenderedAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    changeReturn: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     offerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Offer',
@@ -401,6 +411,16 @@ const storeOrderSchema = new mongoose.Schema(
     totalOrderPaid: {
       type: Number,
       default: 0,
+    },
+    totalOrderTendered: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalOrderChangeReturn: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     totalOrderRefunded: {
       type: Number,
