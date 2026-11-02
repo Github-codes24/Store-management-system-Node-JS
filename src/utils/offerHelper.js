@@ -446,6 +446,13 @@ export const enrichOffersWithProducts = async (rawOffers) => {
           specialPrice: updatedSellingPrice,
         };
       });
+
+      const priceMap = {};
+      item.productPricing.forEach((pp) => {
+        const pIdStr = extractIdString(pp.product);
+        if (pIdStr) priceMap[pIdStr] = pp.updatedSellingPrice;
+      });
+      item.productPriceMap = priceMap;
     }
 
     // Resolve products array
