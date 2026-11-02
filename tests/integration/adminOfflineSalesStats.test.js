@@ -202,4 +202,30 @@ describe('GET /api/admin/orders/offline - Today Cash and Today UPI Stats', () =>
     expect(res.body.todayStats.todayCash).toBe(800);
     expect(res.body.todayStats.todayUPI).toBe(1200);
   });
+
+  it('should filter orders list and display today card stats when isToday=true is provided', async () => {
+    const res = await request(app)
+      .get('/api/admin/orders/offline?isToday=true')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Order 3 (created 5 days ago) must be excluded from today orders list
+    expect(res.body.pagination.total).toBe(3);
+    expect(res.body.data.length).toBe(3);
+    const orderIds = res.body.data.map((o) => o.orderId);
+    expect(orderIds).not.toContain('SODR10003');
+    expect(orderIds).toContain('SODR10001');
+    expect(orderIds).toContain('SODR10002');
+    expect(orderIds).toContain('SODR10004');
+
+    // Stats active cards show Today's figures
+    expect(res.body.stats.isToday).toBe(true);
+    expect(res.body.stats.totalCash).toBe(1200);
+    expect(res.body.stats.totalUPI).toBe(1800);
+    expect(res.body.stats.totalCard).toBe(200);
+    expect(res.body.stats.allTimeCash).toBe(2200);
+    expect(res.body.stats.allTimeUPI).toBe(3800);
+  });
 });

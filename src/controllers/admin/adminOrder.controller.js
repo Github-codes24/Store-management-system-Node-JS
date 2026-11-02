@@ -127,6 +127,9 @@ export const getAdminOfflineSales = async (req, res, next) => {
       search,
       startDate,
       endDate,
+      isToday,
+      dateFilter,
+      filter: filterParam,
       page = 1,
       limit = 10,
     } = req.query;
@@ -166,23 +169,40 @@ export const getAdminOfflineSales = async (req, res, next) => {
       });
     }
 
-    // Date range filter
-    const dateRange = parseDateRange(startDate, endDate);
-    if (dateRange) {
-      filter.createdAt = dateRange;
+    // Check if user requested "Today" shortcut filter
+    const isTodayRequested =
+      String(isToday).toLowerCase() === 'true' ||
+      String(dateFilter).toLowerCase() === 'today' ||
+      String(filterParam).toLowerCase() === 'today';
+
+    const { start: todayStart, end: todayEnd } = getKolkataTodayRange();
+
+    if (isTodayRequested) {
+      filter.createdAt = {
+        $gte: todayStart,
+        $lte: todayEnd,
+      };
+    } else {
+      // Date range filter
+      const dateRange = parseDateRange(startDate, endDate);
+      if (dateRange) {
+        filter.createdAt = dateRange;
+      }
     }
 
     const total = await StoreOrder.countDocuments(filter);
     const pagination = getPagination({ page, limit, total });
     const { limit: queryLimit, skip } = pagination;
 
-    const { start: todayStart, end: todayEnd } = getKolkataTodayRange();
     const todayFilter = {
       ...filter,
       createdAt: { $gte: todayStart, $lte: todayEnd },
     };
 
-    const [ordersRaw, statsOrders, todayOrders] = await Promise.all([
+    const allTimeFilter = { ...filter };
+    delete allTimeFilter.createdAt;
+
+    const [ordersRaw, statsOrders, todayOrders, allTimeOrders] = await Promise.all([
       StoreOrder.find(filter)
         .populate('store', 'name storeCode location')
         .sort({ createdAt: -1 })
@@ -195,10 +215,16 @@ export const getAdminOfflineSales = async (req, res, next) => {
       StoreOrder.find(todayFilter)
         .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
         .lean(),
+      isTodayRequested
+        ? StoreOrder.find(allTimeFilter)
+            .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+            .lean()
+        : Promise.resolve(null),
     ]);
 
     const overallStats = calculateOrderPaymentStats(statsOrders);
     const todayStatsRaw = calculateOrderPaymentStats(todayOrders);
+    const allTimeStatsRaw = allTimeOrders ? calculateOrderPaymentStats(allTimeOrders) : overallStats;
 
     const todayStats = {
       todayCash: todayStatsRaw.totalCash,
@@ -206,6 +232,11 @@ export const getAdminOfflineSales = async (req, res, next) => {
       todayCard: todayStatsRaw.totalCard,
       todayTotal: todayStatsRaw.totalAmount,
     };
+
+    const activeCash = isTodayRequested ? todayStats.todayCash : overallStats.totalCash;
+    const activeUPI = isTodayRequested ? todayStats.todayUPI : overallStats.totalUPI;
+    const activeCard = isTodayRequested ? todayStats.todayCard : overallStats.totalCard;
+    const activeTotal = isTodayRequested ? todayStats.todayTotal : overallStats.totalAmount;
 
     const data = ordersRaw.map((o) => {
       const allItems = o.bills?.flatMap((b) => b.items || []) || [];
@@ -289,20 +320,25 @@ export const getAdminOfflineSales = async (req, res, next) => {
         message: 'Offline sales retrieved successfully',
         data,
         stats: {
-          totalCash: overallStats.totalCash,
-          totalUPI: overallStats.totalUPI,
-          totalCard: overallStats.totalCard,
-          totalAmount: overallStats.totalAmount,
+          totalCash: activeCash,
+          totalUPI: activeUPI,
+          totalCard: activeCard,
+          totalAmount: activeTotal,
           todayCash: todayStats.todayCash,
           todayUPI: todayStats.todayUPI,
           todayCard: todayStats.todayCard,
           todayTotal: todayStats.todayTotal,
-          formattedTotalCash: `₹ ${Math.round(overallStats.totalCash).toLocaleString('en-IN')}`,
-          formattedTotalUPI: `₹ ${Math.round(overallStats.totalUPI).toLocaleString('en-IN')}`,
-          formattedTotalCard: `₹ ${Math.round(overallStats.totalCard).toLocaleString('en-IN')}`,
+          allTimeCash: allTimeStatsRaw.totalCash,
+          allTimeUPI: allTimeStatsRaw.totalUPI,
+          allTimeCard: allTimeStatsRaw.totalCard,
+          allTimeTotal: allTimeStatsRaw.totalAmount,
+          formattedTotalCash: `₹ ${Math.round(activeCash).toLocaleString('en-IN')}`,
+          formattedTotalUPI: `₹ ${Math.round(activeUPI).toLocaleString('en-IN')}`,
+          formattedTotalCard: `₹ ${Math.round(activeCard).toLocaleString('en-IN')}`,
           formattedTodayCash: `₹ ${Math.round(todayStats.todayCash).toLocaleString('en-IN')}`,
           formattedTodayUPI: `₹ ${Math.round(todayStats.todayUPI).toLocaleString('en-IN')}`,
           formattedTodayCard: `₹ ${Math.round(todayStats.todayCard).toLocaleString('en-IN')}`,
+          isToday: isTodayRequested,
         },
         todayStats,
         pagination,
