@@ -35,6 +35,10 @@ const permissionsTreeZodSchema = z
     taxManagement: permissionActionsZodSchema,
     rolesAndPermissions: permissionActionsZodSchema,
     reports: permissionActionsZodSchema,
+    // Store panel modules
+    billing: permissionActionsZodSchema,
+    productInventory: permissionActionsZodSchema,
+    offers: permissionActionsZodSchema,
   })
   .optional()
   .default({});
@@ -48,6 +52,12 @@ export const createRoleSchema = z.object({
     .enum(['Store', 'Sub-admin'], { required_error: 'Role category is required' })
     .default('Store'),
   subAdmin: z.string().trim().nullable().optional(),
+  store: z.string().trim().nullable().optional(),
+  storeId: z.string().trim().nullable().optional(),
+  storeEmployee: z.string().trim().nullable().optional(),
+  storeEmployeeId: z.string().trim().nullable().optional(),
+  employeeId: z.string().trim().nullable().optional(),
+  storeEmployees: z.array(z.string().trim()).optional().default([]),
   description: z.string().trim().optional().default(''),
   permissions: permissionsTreeZodSchema,
 });
@@ -60,6 +70,12 @@ export const updateRoleSchema = z.object({
     .optional(),
   roleCategory: z.enum(['Store', 'Sub-admin']).optional(),
   subAdmin: z.string().trim().nullable().optional(),
+  store: z.string().trim().nullable().optional(),
+  storeId: z.string().trim().nullable().optional(),
+  storeEmployee: z.string().trim().nullable().optional(),
+  storeEmployeeId: z.string().trim().nullable().optional(),
+  employeeId: z.string().trim().nullable().optional(),
+  storeEmployees: z.array(z.string().trim()).optional(),
   description: z.string().trim().optional(),
   permissions: permissionsTreeZodSchema,
 });
@@ -70,4 +86,6 @@ export const getRolesQuerySchema = z.object({
   search: z.string().optional(),
   roleCategory: z.enum(['Store', 'Sub-admin', 'all', 'All']).optional(),
   subAdminId: z.string().optional(),
+  storeId: z.string().optional(),
+  storeEmployeeId: z.string().optional(),
 });

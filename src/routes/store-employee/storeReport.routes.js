@@ -7,11 +7,13 @@ import {
   getStorePnLReport,
 } from '../../controllers/store-employee/storeReport.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
+import requireStorePermission from '../../middlewares/storePermission.middleware.js';
 
 const router = Router();
 
-// Require store employee authentication
+// Require store employee authentication and reports module permission
 router.use(storeEmployeeAuth);
+router.use(requireStorePermission('reports', 'viewOnly'));
 
 // 1. Sales Register Report
 router.get('/sales-register', getSalesRegisterReport);

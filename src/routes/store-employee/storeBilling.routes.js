@@ -14,11 +14,13 @@ import {
 } from '../../controllers/store-employee/storeBilling.controller.js';
 import { getStoreBillingApplicableOffers } from '../../controllers/store-employee/storeEmployee.offer.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
+import requireStorePermission from '../../middlewares/storePermission.middleware.js';
 
 const router = Router();
 
-// Apply store employee auth middleware
+// Apply store employee auth middleware and billing module permission
 router.use(storeEmployeeAuth);
+router.use(requireStorePermission('billing', 'viewOnly'));
 
 // Billing endpoints
 router.post('/bills', createOrAppendOrderBill);
@@ -33,7 +35,6 @@ router.get('/applicable-offers', getStoreBillingApplicableOffers);
 // Dynamic POS QR Code Billing endpoints
 router.post('/generate-qr', generatePosBillingQrCode);
 router.get('/qr-status/:qrId', checkPosBillingQrStatus);
-
 
 // Returns endpoints
 router.get('/lookup-bill/:identifier', lookupBillForReturn);

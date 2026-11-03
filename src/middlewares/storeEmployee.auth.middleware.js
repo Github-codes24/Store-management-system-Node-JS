@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import env from '../config/env.js';
 import StoreEmployee from '../models/storeEmployee.model.js';
 import { unauthorized } from '../utils/api-error.js';
+import { resolveStoreEmployeePermissions } from '../controllers/store-employee/storeEmployee.auth.controller.js';
 
 const storeEmployeeAuth = async (req, _res, next) => {
   try {
@@ -23,7 +24,20 @@ const storeEmployeeAuth = async (req, _res, next) => {
       return next(unauthorized('Store employee not found.'));
     }
 
+    const accessInfo = await resolveStoreEmployeePermissions(storeEmployee);
+    storeEmployee.role = accessInfo.role;
+    storeEmployee.roleId = accessInfo.roleId;
+    storeEmployee.permissions = accessInfo.permissions;
+    storeEmployee.isFullAccess = accessInfo.isFullAccess;
+    if (accessInfo.assignedRole) {
+      storeEmployee.assignedRole = accessInfo.assignedRole;
+    }
+
     req.storeEmployee = storeEmployee;
+    req.permissions = accessInfo.permissions;
+    req.isFullAccess = accessInfo.isFullAccess;
+    req.userRole = accessInfo.role;
+
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

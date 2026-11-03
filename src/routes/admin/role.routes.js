@@ -6,6 +6,8 @@ import {
   updateRole,
   deleteRole,
   getSubAdminsDropdown,
+  getStoreEmployeesDropdown,
+  getStoresDropdown,
   getModulesSchema,
 } from '../../controllers/admin/role.controller.js';
 import adminAuth from '../../middlewares/admin.auth.middleware.js';
@@ -24,6 +26,8 @@ router.use(adminAuth);
 
 // Dropdown & Helper metadata endpoints (placed before parametrized /:id)
 router.get('/subadmins-dropdown', requirePermission('rolesAndPermissions', 'viewOnly'), getSubAdminsDropdown);
+router.get('/store-employees-dropdown', requirePermission('rolesAndPermissions', 'viewOnly'), getStoreEmployeesDropdown);
+router.get('/stores-dropdown', requirePermission('rolesAndPermissions', 'viewOnly'), getStoresDropdown);
 router.get('/modules-schema', requirePermission('rolesAndPermissions', 'viewOnly'), getModulesSchema);
 
 // Base CRUD endpoints
@@ -34,4 +38,3 @@ router.put('/:id', requirePermission('rolesAndPermissions', 'modify'), validate(
 router.delete('/:id', requirePermission('rolesAndPermissions', 'delete'), deleteRole);
 
 export default router;
-

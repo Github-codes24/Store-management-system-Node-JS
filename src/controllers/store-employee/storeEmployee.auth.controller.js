@@ -7,6 +7,75 @@ import { successResponse } from '../../utils/api-response.js';
 import { badRequest, unauthorized, notFound } from '../../utils/api-error.js';
 import sendMail from '../../config/mailer.js';
 
+/**
+ * Resolves the effective module permissions and role for a store employee.
+ * If employee has no restricted role assigned, grants full access (backwards compatible).
+ */
+export const resolveStoreEmployeePermissions = async (employee) => {
+  const Role = (await import('../../models/role.model.js')).default;
+
+  let roleDoc = null;
+  if (employee.roleId) {
+    roleDoc = await Role.findOne({ _id: employee.roleId, isDeleted: false }).lean();
+  }
+
+  if (!roleDoc) {
+    roleDoc = await Role.findOne({
+      $or: [
+        { storeEmployee: employee._id },
+        { storeEmployees: employee._id },
+      ],
+      isDeleted: false,
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+  }
+
+  // DEFAULT FULL ACCESS for unassigned / existing employees
+  const defaultFullPermissions = {
+    dashboard: { viewOnly: true },
+    customers: { viewOnly: true, create: true, modify: true, delete: true },
+    billing: { viewOnly: true, create: true, modify: true, delete: true },
+    offlineSales: { viewOnly: true },
+    onlineOrders: { viewOnly: true, modifyStatus: true },
+    productInventory: { viewOnly: true, create: true, modify: true, delete: true },
+    storeProducts: { viewOnly: true, create: true, modify: true, delete: true },
+    offers: { viewOnly: true, create: true, modify: true, delete: true },
+    offersManagement: { viewOnly: true, create: true, modify: true, delete: true },
+    reports: { viewOnly: true },
+  };
+
+  if (!roleDoc || !roleDoc.permissions || Object.keys(roleDoc.permissions).length === 0) {
+    return {
+      isFullAccess: true,
+      role: employee.roleName || employee.designation || 'Store Staff',
+      roleId: null,
+      permissions: defaultFullPermissions,
+      assignedRole: null,
+    };
+  }
+
+  // Normalize permissions to support both Store and Admin terminology
+  const perms = { ...roleDoc.permissions };
+  if (perms.productInventory && !perms.storeProducts) perms.storeProducts = perms.productInventory;
+  if (perms.storeProducts && !perms.productInventory) perms.productInventory = perms.storeProducts;
+  if (perms.offers && !perms.offersManagement) perms.offersManagement = perms.offers;
+  if (perms.offersManagement && !perms.offers) perms.offers = perms.offersManagement;
+
+  return {
+    isFullAccess: false,
+    role: roleDoc.roleName || employee.roleName || employee.designation || 'Store Staff',
+    roleId: roleDoc._id,
+    permissions: perms,
+    assignedRole: {
+      id: roleDoc._id,
+      roleName: roleDoc.roleName,
+      roleCategory: roleDoc.roleCategory,
+      description: roleDoc.description,
+    },
+  };
+};
+
 export const login = async (req, res) => {
   const { userId, password } = req.body;
 
@@ -24,8 +93,17 @@ export const login = async (req, res) => {
     throw unauthorized('Invalid User ID or password');
   }
 
+  const accessInfo = await resolveStoreEmployeePermissions(employee);
+
   const token = jwt.sign(
-    { id: employee._id, email: employee.email, userId: employee.userId, role: 'storeEmployee' },
+    {
+      id: employee._id,
+      email: employee.email,
+      userId: employee.userId,
+      role: accessInfo.role,
+      roleId: accessInfo.roleId,
+      isFullAccess: accessInfo.isFullAccess,
+    },
     env.STORE_EMPLOYEE_JWT_SECRET,
     { expiresIn: env.STORE_EMPLOYEE_JWT_EXPIRES_IN }
   );
@@ -41,10 +119,24 @@ export const login = async (req, res) => {
     employeeObj.storeId.phone = formattedMob;
   }
 
+  employeeObj.role = accessInfo.role;
+  employeeObj.roleId = accessInfo.roleId;
+  employeeObj.permissions = accessInfo.permissions;
+  employeeObj.isFullAccess = accessInfo.isFullAccess;
+  if (accessInfo.assignedRole) {
+    employeeObj.assignedRole = accessInfo.assignedRole;
+  }
+
   return res.status(200).json(
     successResponse({
       message: 'Login successful',
-      data: { storeEmployee: employeeObj, token },
+      data: {
+        storeEmployee: employeeObj,
+        permissions: accessInfo.permissions,
+        role: accessInfo.role,
+        isFullAccess: accessInfo.isFullAccess,
+        token,
+      },
     })
   );
 };
@@ -63,6 +155,12 @@ export const getProfile = async (req, res) => {
   const employee = await StoreEmployee.findById(req.storeEmployee._id)
     .populate('storeId', 'name storeCode location mobile email');
 
+  if (!employee) {
+    throw notFound('Store employee not found');
+  }
+
+  const accessInfo = await resolveStoreEmployeePermissions(employee);
+
   const employeeObj = employee.toObject();
   delete employeeObj.password;
   if (employeeObj.storeId) {
@@ -72,10 +170,23 @@ export const getProfile = async (req, res) => {
     employeeObj.storeId.phone = formattedMob;
   }
 
+  employeeObj.role = accessInfo.role;
+  employeeObj.roleId = accessInfo.roleId;
+  employeeObj.permissions = accessInfo.permissions;
+  employeeObj.isFullAccess = accessInfo.isFullAccess;
+  if (accessInfo.assignedRole) {
+    employeeObj.assignedRole = accessInfo.assignedRole;
+  }
+
   return res.status(200).json(
     successResponse({
       message: 'Profile retrieved successfully',
-      data: { storeEmployee: employeeObj },
+      data: {
+        storeEmployee: employeeObj,
+        permissions: accessInfo.permissions,
+        role: accessInfo.role,
+        isFullAccess: accessInfo.isFullAccess,
+      },
     })
   );
 };
@@ -160,7 +271,7 @@ export const resendOtp = async (req, res) => {
 
   return res.status(200).json(
     successResponse({
-      message: 'A new 4-digit OTP has been sent to your email address',
+      message: 'A new 4-digit OTP has been resent to your registered email address',
       data: { email: employee.email, otp },
     })
   );
@@ -177,22 +288,26 @@ export const verifyOtp = async (req, res) => {
     isDeleted: false,
   }).select('+resetOtp +resetOtpExpires');
 
-  if (!employee || !employee.resetOtp || employee.resetOtp !== otp) {
+  if (!employee) {
+    throw notFound('Store employee account not found');
+  }
+
+  if (!employee.resetOtp || employee.resetOtp !== String(otp).trim()) {
     throw badRequest('Invalid OTP');
   }
 
   if (employee.resetOtpExpires < new Date()) {
-    throw badRequest('OTP has expired. Please request a new code.');
+    throw badRequest('OTP has expired. Please request a new one.');
   }
 
-  // Generate short-lived reset token (15 mins)
+  // Clear OTP and set reset token
   const resetToken = crypto.randomBytes(32).toString('hex');
-  const resetTokenExpires = new Date(Date.now() + 15 * 60 * 1000);
+  const resetTokenExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-  employee.resetToken = resetToken;
-  employee.resetTokenExpires = resetTokenExpires;
   employee.resetOtp = null;
   employee.resetOtpExpires = null;
+  employee.resetToken = resetToken;
+  employee.resetTokenExpires = resetTokenExpires;
   await employee.save();
 
   return res.status(200).json(

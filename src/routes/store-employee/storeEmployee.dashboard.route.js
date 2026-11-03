@@ -9,10 +9,12 @@ import {
   getSeeAllMostDemandingProducts,
 } from '../../controllers/store-employee/storeEmployee.dashboard.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
+import requireStorePermission from '../../middlewares/storePermission.middleware.js';
 
 const router = Router();
 
 router.use(storeEmployeeAuth);
+router.use(requireStorePermission('dashboard', 'viewOnly'));
 
 router.get('/', getDashboardOverview);
 router.get('/recent-orders', getSeeAllRecentOrders);

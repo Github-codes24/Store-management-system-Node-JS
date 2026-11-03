@@ -13,6 +13,7 @@ import {
   printStoreProductBarcode,
 } from '../../controllers/store-employee/storeProduct.controller.js';
 import storeEmployeeAuth from '../../middlewares/storeEmployee.auth.middleware.js';
+import requireStorePermission from '../../middlewares/storePermission.middleware.js';
 import upload from '../../config/storage.js';
 import parseForm from '../../middlewares/parseForm.middleware.js';
 
@@ -22,21 +23,21 @@ const router = Router();
 router.use(storeEmployeeAuth);
 
 // Helper endpoints
-router.get('/attributes', getStoreProductAttributes);
-router.get('/options', getStoreProductDropdownOptions);
-router.get('/export', exportStoreProducts);
-router.get('/barcode/:barcode', lookupStoreProductBarcode);
+router.get('/attributes', requireStorePermission('productInventory', 'viewOnly'), getStoreProductAttributes);
+router.get('/options', requireStorePermission('productInventory', 'viewOnly'), getStoreProductDropdownOptions);
+router.get('/export', requireStorePermission('productInventory', 'viewOnly'), exportStoreProducts);
+router.get('/barcode/:barcode', requireStorePermission('productInventory', 'viewOnly'), lookupStoreProductBarcode);
 
 // CRUD
-router.get('/', getStoreProducts);
-router.get('/:id', getStoreProductById);
-router.post('/', upload.any(), parseForm, createStoreProduct);
-router.put('/:id', upload.any(), parseForm, updateStoreProduct);
-router.patch('/:id/status', toggleStoreProductStatus);
-router.delete('/:id', deleteStoreProduct);
+router.get('/', requireStorePermission('productInventory', 'viewOnly'), getStoreProducts);
+router.get('/:id', requireStorePermission('productInventory', 'viewOnly'), getStoreProductById);
+router.post('/', requireStorePermission('productInventory', 'create'), upload.any(), parseForm, createStoreProduct);
+router.put('/:id', requireStorePermission('productInventory', 'modify'), upload.any(), parseForm, updateStoreProduct);
+router.patch('/:id/status', requireStorePermission('productInventory', 'modify'), toggleStoreProductStatus);
+router.delete('/:id', requireStorePermission('productInventory', 'delete'), deleteStoreProduct);
 
 // Print Barcode
-router.get('/:id/print-barcode', printStoreProductBarcode);
-router.post('/:id/print-barcode', printStoreProductBarcode);
+router.get('/:id/print-barcode', requireStorePermission('productInventory', 'viewOnly'), printStoreProductBarcode);
+router.post('/:id/print-barcode', requireStorePermission('productInventory', 'viewOnly'), printStoreProductBarcode);
 
 export default router;

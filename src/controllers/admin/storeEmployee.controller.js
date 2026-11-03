@@ -17,7 +17,7 @@ const formatEmployeeForAdmin = (employeeDoc) => {
 };
 
 export const createStoreEmployee = async (req, res) => {
-  const { name, email, userId, password, mobile, designation, storeId, address } = req.body;
+  const { name, email, userId, password, mobile, designation, storeId, address, roleId, roleName } = req.body;
 
   // Check assigned store existence
   const store = await Store.findOne({ _id: storeId, isDeleted: false });
@@ -53,6 +53,8 @@ export const createStoreEmployee = async (req, res) => {
     designation,
     storeId,
     address: address || null,
+    roleId: roleId || null,
+    roleName: roleName || null,
   });
 
   const populatedEmployee = await StoreEmployee.findById(storeEmployee._id).populate('storeId', 'name storeCode location');
@@ -145,6 +147,8 @@ export const getStoreEmployees = async (req, res) => {
         address: 1,
         userId: 1,
         password: 1,
+        roleId: 1,
+        roleName: 1,
         createdAt: 1,
         updatedAt: 1,
       },

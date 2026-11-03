@@ -48,6 +48,16 @@ const storeEmployeeSchema = new mongoose.Schema(
       ref: 'Store',
       required: [true, 'Assigned Store is required'],
     },
+    roleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Role',
+      default: null,
+    },
+    roleName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     address: {
       type: String,
       trim: true,

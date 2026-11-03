@@ -35,6 +35,10 @@ const modulePermissionsSchema = new mongoose.Schema(
     taxManagement: permissionActionsSchema,
     rolesAndPermissions: permissionActionsSchema,
     reports: permissionActionsSchema,
+    // Store panel specific modules
+    billing: permissionActionsSchema,
+    productInventory: permissionActionsSchema,
+    offers: permissionActionsSchema,
   },
   { _id: false }
 );
@@ -60,6 +64,22 @@ const roleSchema = new mongoose.Schema(
       ref: 'SubAdmin',
       default: null,
     },
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Store',
+      default: null,
+    },
+    storeEmployee: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'StoreEmployee',
+      default: null,
+    },
+    storeEmployees: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'StoreEmployee',
+      },
+    ],
     description: {
       type: String,
       trim: true,
