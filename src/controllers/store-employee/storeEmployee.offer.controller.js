@@ -163,62 +163,6 @@ export const getStoreOfferFormOptions = async (req, res, next) => {
       }
     }
 
-    // Fetch recent non-deleted offers for this store to enrich remaining product options with current offer promotional pricing
-    const offerFilter = { isDeleted: false };
-    if (employeeStoreId) {
-      offerFilter.$or = [{ stores: employeeStoreId }, { applyToAllStores: true }];
-    }
-
-    const recentOffers = await Offer.find(offerFilter)
-      .sort({ updatedAt: -1 })
-      .lean();
-
-    for (const off of recentOffers) {
-      if (Array.isArray(off.productPricing)) {
-        for (const pp of off.productPricing) {
-          const pId = pp.product ? (pp.product._id || pp.product.id || pp.product).toString() : null;
-          const pPrice = pp.updatedSellingPrice !== undefined
-            ? pp.updatedSellingPrice
-            : (pp.offerBasePrice !== undefined
-                ? pp.offerBasePrice
-                : (pp.price !== undefined ? pp.price : (pp.offerPrice !== undefined ? pp.offerPrice : pp.sellingPrice)));
-          if (pId && pPrice !== undefined && pPrice !== null && !isNaN(Number(pPrice)) && !offerPriceMap.has(pId)) {
-            offerPriceMap.set(pId, Number(pPrice));
-          }
-        }
-      }
-
-      if (off.buyDetails && off.buyDetails.buyProduct) {
-        const bProd = off.buyDetails.buyProduct;
-        const bId = (bProd._id || bProd.id || bProd).toString();
-        const bPrice = off.buyDetails.updatedSellingPrice !== undefined
-          ? off.buyDetails.updatedSellingPrice
-          : (off.buyDetails.offerBasePrice !== undefined
-              ? off.buyDetails.offerBasePrice
-              : (off.buyDetails.sellingPrice !== undefined
-                  ? off.buyDetails.sellingPrice
-                  : (off.buyDetails.offerPrice !== undefined ? off.buyDetails.offerPrice : off.buyDetails.price)));
-        if (bId && bPrice !== undefined && bPrice !== null && !isNaN(Number(bPrice)) && !offerPriceMap.has(bId)) {
-          offerPriceMap.set(bId, Number(bPrice));
-        }
-      }
-
-      if (off.getFreeDetails && off.getFreeDetails.freeProduct) {
-        const fProd = off.getFreeDetails.freeProduct;
-        const fId = (fProd._id || fProd.id || fProd).toString();
-        const fPrice = off.getFreeDetails.updatedSellingPrice !== undefined
-          ? off.getFreeDetails.updatedSellingPrice
-          : (off.getFreeDetails.offerBasePrice !== undefined
-              ? off.getFreeDetails.offerBasePrice
-              : (off.getFreeDetails.sellingPrice !== undefined
-                  ? off.getFreeDetails.sellingPrice
-                  : (off.getFreeDetails.offerPrice !== undefined ? off.getFreeDetails.offerPrice : off.getFreeDetails.price)));
-        if (fId && fPrice !== undefined && fPrice !== null && !isNaN(Number(fPrice)) && !offerPriceMap.has(fId)) {
-          offerPriceMap.set(fId, Number(fPrice));
-        }
-      }
-    }
-
     productItems = productItems.map((item) => {
       const pIdStr = (item._id || item.id).toString();
       const offerSp = offerPriceMap.get(pIdStr);
