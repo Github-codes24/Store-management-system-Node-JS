@@ -632,12 +632,16 @@ export const getActiveProductPricingMap = async (storeId = null) => {
           if (pId && !pricingMap.has(pId) && pPrice !== undefined && Number(pPrice) > 0) {
             pricingMap.set(pId, {
               updatedSellingPrice: Number(pPrice),
+              offerPrice: Number(pPrice),
+              promotionalSellingPrice: Number(pPrice),
               originalSellingPrice: Number(pp.originalSellingPrice) || undefined,
               mrp: Number(pp.mrp) || undefined,
               offerId: off._id,
               offerName: off.name,
               discountType: off.discountType,
               discountValue: off.discountValue,
+              validFrom: off.validFrom,
+              validTo: off.validTo,
             });
           }
         }
@@ -653,10 +657,14 @@ export const getActiveProductPricingMap = async (storeId = null) => {
         if (bId && !pricingMap.has(bId) && bPrice !== undefined && Number(bPrice) > 0) {
           pricingMap.set(bId, {
             updatedSellingPrice: Number(bPrice),
+            offerPrice: Number(bPrice),
+            promotionalSellingPrice: Number(bPrice),
             offerId: off._id,
             offerName: off.name,
             discountType: off.discountType,
             discountValue: off.discountValue,
+            validFrom: off.validFrom,
+            validTo: off.validTo,
           });
         }
       }
@@ -671,10 +679,14 @@ export const getActiveProductPricingMap = async (storeId = null) => {
         if (fId && !pricingMap.has(fId) && fPrice !== undefined && Number(fPrice) > 0) {
           pricingMap.set(fId, {
             updatedSellingPrice: Number(fPrice),
+            offerPrice: Number(fPrice),
+            promotionalSellingPrice: Number(fPrice),
             offerId: off._id,
             offerName: off.name,
             discountType: off.discountType,
             discountValue: off.discountValue,
+            validFrom: off.validFrom,
+            validTo: off.validTo,
           });
         }
       }

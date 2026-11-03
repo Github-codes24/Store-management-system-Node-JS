@@ -266,14 +266,29 @@ export const getStoreProducts = async (req, res, next) => {
         originalSellingPrice: product.offlineSellingPrice,
         catalogSellingPrice: product.offlineSellingPrice,
         promotionalSellingPrice,
+        offerSellingPrice: promotionalSellingPrice,
+        updatedSellingPrice: promotionalSellingPrice,
+        offerPrice: promotionalSellingPrice,
+        specialPrice: promotionalSellingPrice,
+        offerSP: promotionalSellingPrice,
+        offerName: hasOffer ? promoInfo.offerName : null,
+        offerValidFrom: hasOffer ? promoInfo.validFrom : null,
+        offerValidTo: hasOffer ? promoInfo.validTo : null,
         hasActiveOffer: hasOffer,
         activeOffer: hasOffer
           ? {
               offerId: promoInfo.offerId,
+              id: promoInfo.offerId,
+              _id: promoInfo.offerId,
+              name: promoInfo.offerName,
               offerName: promoInfo.offerName,
+              updatedSellingPrice: promoInfo.updatedSellingPrice,
+              offerPrice: promoInfo.updatedSellingPrice,
               promotionalSellingPrice: promoInfo.updatedSellingPrice,
               discountType: promoInfo.discountType,
               discountValue: promoInfo.discountValue,
+              validFrom: promoInfo.validFrom,
+              validTo: promoInfo.validTo,
             }
           : null,
         purchasePrice: product.purchasePrice,
@@ -347,14 +362,29 @@ export const getStoreProductById = async (req, res, next) => {
     const hasOffer = Boolean(promoInfo && promoInfo.updatedSellingPrice !== undefined && Number(promoInfo.updatedSellingPrice) > 0);
     const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
     product.promotionalSellingPrice = promotionalSellingPrice;
+    product.offerSellingPrice = promotionalSellingPrice;
+    product.updatedSellingPrice = promotionalSellingPrice;
+    product.offerPrice = promotionalSellingPrice;
+    product.specialPrice = promotionalSellingPrice;
+    product.offerSP = promotionalSellingPrice;
+    product.offerName = hasOffer ? promoInfo.offerName : null;
+    product.offerValidFrom = hasOffer ? promoInfo.validFrom : null;
+    product.offerValidTo = hasOffer ? promoInfo.validTo : null;
     product.hasActiveOffer = hasOffer;
     product.activeOffer = hasOffer
       ? {
           offerId: promoInfo.offerId,
+          id: promoInfo.offerId,
+          _id: promoInfo.offerId,
+          name: promoInfo.offerName,
           offerName: promoInfo.offerName,
+          updatedSellingPrice: promoInfo.updatedSellingPrice,
+          offerPrice: promoInfo.updatedSellingPrice,
           promotionalSellingPrice: promoInfo.updatedSellingPrice,
           discountType: promoInfo.discountType,
           discountValue: promoInfo.discountValue,
+          validFrom: promoInfo.validFrom,
+          validTo: promoInfo.validTo,
         }
       : null;
 
@@ -1243,14 +1273,29 @@ export const lookupStoreProductBarcode = async (req, res, next) => {
     let productData = product.toObject ? product.toObject() : product;
     const promotionalSellingPrice = hasOffer ? Number(promoInfo.updatedSellingPrice) : null;
     productData.promotionalSellingPrice = promotionalSellingPrice;
+    productData.offerSellingPrice = promotionalSellingPrice;
+    productData.updatedSellingPrice = promotionalSellingPrice;
+    productData.offerPrice = promotionalSellingPrice;
+    productData.specialPrice = promotionalSellingPrice;
+    productData.offerSP = promotionalSellingPrice;
+    productData.offerName = hasOffer ? promoInfo.offerName : null;
+    productData.offerValidFrom = hasOffer ? promoInfo.validFrom : null;
+    productData.offerValidTo = hasOffer ? promoInfo.validTo : null;
     productData.hasActiveOffer = hasOffer;
     productData.activeOffer = hasOffer
       ? {
           offerId: promoInfo.offerId,
+          id: promoInfo.offerId,
+          _id: promoInfo.offerId,
+          name: promoInfo.offerName,
           offerName: promoInfo.offerName,
+          updatedSellingPrice: promoInfo.updatedSellingPrice,
+          offerPrice: promoInfo.updatedSellingPrice,
           promotionalSellingPrice: promoInfo.updatedSellingPrice,
           discountType: promoInfo.discountType,
           discountValue: promoInfo.discountValue,
+          validFrom: promoInfo.validFrom,
+          validTo: promoInfo.validTo,
         }
       : null;
 
