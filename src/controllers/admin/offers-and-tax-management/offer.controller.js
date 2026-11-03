@@ -191,6 +191,7 @@ export const createOffer = async (req, res, next) => {
 
     const populatedOffer = await Offer.findById(offer._id)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
       .populate('createdBy', 'name email role')
       .populate('buyDetails.buyProduct', 'productName name barcode')
@@ -230,6 +231,7 @@ export const getOffers = async (req, res, next) => {
 
     let offers = await Offer.find(filter)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email')
       .populate('createdBy', 'name email role')
       .populate('buyDetails.buyProduct', 'productName name barcode')
@@ -271,6 +273,11 @@ export const getOffers = async (req, res, next) => {
         discountLabel,
         product: productLabel,
         products: off.resolvedProducts && off.resolvedProducts.length > 0 ? off.resolvedProducts : off.products,
+        appliesTo: off.appliesTo || (off.category ? 'category' : (off.products && off.products.length > 0 ? 'product' : 'all')),
+        category: off.category,
+        categoryId: off.category?._id || off.category || null,
+        categoryName: off.categoryName || (off.category?.name || ''),
+        categories: off.categories || [],
         pushOfferTo,
         sendToAllCustomers: off.sendToAllCustomers,
         targetCustomersCount: off.targetCustomers ? off.targetCustomers.length : 0,
@@ -318,6 +325,7 @@ export const getOfferById = async (req, res, next) => {
 
     const offer = await Offer.findOne({ _id: id, isDeleted: false })
       .populate('stores', 'name storeCode location')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
       .populate('createdBy', 'name email role')
       .populate('buyDetails.buyProduct', 'productName name barcode')
@@ -437,6 +445,7 @@ export const updateOffer = async (req, res, next) => {
 
     const updatedOffer = await Offer.findById(id)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email')
       .populate('createdBy', 'name email role')
       .populate('buyDetails.buyProduct', 'productName name barcode')

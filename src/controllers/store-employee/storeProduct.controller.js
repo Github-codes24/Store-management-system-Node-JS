@@ -235,6 +235,8 @@ export const getStoreProducts = async (req, res, next) => {
         brandName,
         productType: product.productType,
         category: product.category,
+        categoryId: product.category?._id || product.category || null,
+        categoryName: product.category?.name || '',
         subcategory: product.subcategory,
         batchType: product.batchType,
         batch: effectiveBatch,

@@ -405,6 +405,7 @@ export const createStoreOffer = async (req, res, next) => {
 
     const populatedOffer = await Offer.findById(offer._id)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
       .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
       .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
@@ -494,6 +495,11 @@ export const getStoreOffers = async (req, res, next) => {
         product: productLabel,
         products: off.resolvedProducts && off.resolvedProducts.length > 0 ? off.resolvedProducts : off.products,
         productPricing: off.productPricing || [],
+        appliesTo: off.appliesTo || (off.category ? 'category' : (off.products && off.products.length > 0 ? 'product' : 'all')),
+        category: off.category,
+        categoryId: off.category?._id || off.category || null,
+        categoryName: off.categoryName || (off.category?.name || ''),
+        categories: off.categories || [],
         pushOfferTo,
         sendToAllCustomers: off.sendToAllCustomers,
         targetCustomersCount: off.targetCustomers ? off.targetCustomers.length : 0,
@@ -1016,8 +1022,9 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
         discountValue: off.discountValue,
         discountTag,
         appliesTo: off.appliesTo || (off.category ? 'category' : 'all'),
-        category: off.category?._id || off.category || null,
-        categoryName: off.category?.name || '',
+        category: off.category,
+        categoryId: off.category?._id || off.category || null,
+        categoryName: off.category?.name || off.categoryName || '',
         categories: off.categories || [],
         products: off.products || [],
         productPricing: off.productPricing || [],
