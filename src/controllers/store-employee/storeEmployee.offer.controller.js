@@ -261,6 +261,8 @@ export const createStoreOffer = async (req, res, next) => {
       buyDetails,
       getFreeDetails,
       appliesTo,
+      category,
+      categories,
       products,
       productPricing,
       sendToAllCustomers,
@@ -368,9 +370,14 @@ export const createStoreOffer = async (req, res, next) => {
     }
     resolvedProducts = Array.from(new Set(resolvedProducts.filter(isValidObjectId)));
 
+    let finalCategory = category && isValidObjectId(category) ? category : null;
+    let finalCategories = Array.isArray(categories) ? categories.filter(isValidObjectId) : [];
+    if (!finalCategory && finalCategories.length > 0) {
+      finalCategory = finalCategories[0];
+    }
     const resolvedAppliesTo = (appliesTo === 'all' && resolvedProducts.length > 0)
       ? 'product'
-      : (appliesTo || (resolvedProducts.length > 0 ? 'product' : 'all'));
+      : (finalCategory ? 'category' : (appliesTo || (resolvedProducts.length > 0 ? 'product' : 'all')));
     const resolvedOfferType = (resolvedAppliesTo === 'product') ? 'special' : (offerType || 'store_wide');
 
     const offer = await Offer.create({
@@ -387,6 +394,8 @@ export const createStoreOffer = async (req, res, next) => {
       buyDetails: buyDetails || { buyProduct: null, buyQuantity: 1 },
       getFreeDetails: getFreeDetails || { freeProduct: null, freeQuantity: 1 },
       appliesTo: resolvedAppliesTo,
+      category: finalCategory,
+      categories: finalCategories,
       products: resolvedProducts,
       productPricing: validatedProductPricing,
       sendToAllCustomers: true,
@@ -441,6 +450,7 @@ export const getStoreOffers = async (req, res, next) => {
 
     let offers = await Offer.find(filter)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email')
       .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
       .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
@@ -532,6 +542,7 @@ export const getStoreOfferById = async (req, res, next) => {
 
     const offer = await Offer.findOne({ _id: id, isDeleted: false })
       .populate('stores', 'name storeCode location')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email totalPurchase amountDue')
       .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
       .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
@@ -718,6 +729,17 @@ export const updateStoreOffer = async (req, res, next) => {
       }
     }
 
+    if (updateData.category !== undefined) {
+      offer.category = updateData.category && isValidObjectId(updateData.category) ? updateData.category : null;
+      if (updateData.category && (!updateData.appliesTo || updateData.appliesTo === 'all')) {
+        offer.appliesTo = 'category';
+      } else if (!updateData.category && updateData.appliesTo === 'category') {
+        offer.appliesTo = 'all';
+      }
+    }
+    if (updateData.categories !== undefined) {
+      offer.categories = Array.isArray(updateData.categories) ? updateData.categories.filter(isValidObjectId) : [];
+    }
     if (updateData.appliesTo !== undefined) offer.appliesTo = updateData.appliesTo;
     if (updateData.products !== undefined) {
       offer.products = await sanitizeProductIds(updateData.products, employeeStoreId);
@@ -827,6 +849,7 @@ export const updateStoreOffer = async (req, res, next) => {
 
     const updatedOffer = await Offer.findById(id)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .populate('targetCustomers', 'name phone email')
       .populate('buyDetails.buyProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice')
       .populate('getFreeDetails.freeProduct', 'productName name barcode mrp purchasePrice offlineSellingPrice');
@@ -971,6 +994,7 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
 
     const offers = await Offer.find(filter)
       .populate('stores', 'name storeCode')
+      .populate('category', 'name')
       .sort({ discountValue: -1 })
       .lean();
 
@@ -979,7 +1003,7 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
 
     const formattedOffers = offers.map((off) => {
       const discountTag = off.discountType === 'percentage' ? `${off.discountValue}% OFF` : `₹${off.discountValue} OFF`;
-      const isStoreWide = (off.offerType === 'store_wide' || off.appliesTo === 'all') && (!off.products || off.products.length === 0);
+      const isStoreWide = (off.offerType === 'store_wide' || off.appliesTo === 'all' || off.appliesTo === 'category') && (!off.products || off.products.length === 0);
 
       const formatted = {
         _id: off._id,
@@ -991,7 +1015,10 @@ export const getStoreBillingApplicableOffers = async (req, res, next) => {
         discountType: off.discountType,
         discountValue: off.discountValue,
         discountTag,
-        appliesTo: off.appliesTo,
+        appliesTo: off.appliesTo || (off.category ? 'category' : 'all'),
+        category: off.category?._id || off.category || null,
+        categoryName: off.category?.name || '',
+        categories: off.categories || [],
         products: off.products || [],
         productPricing: off.productPricing || [],
         sendToAllCustomers: off.sendToAllCustomers,

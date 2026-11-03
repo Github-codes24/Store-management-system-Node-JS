@@ -208,6 +208,15 @@ export const enrichOffersWithProducts = async (rawOffers) => {
         if (isValidObjectId(pId)) idSet.add(pId);
       });
     }
+
+    const catId = extractIdString(doc.category);
+    if (isValidObjectId(catId)) idSet.add(catId);
+    if (Array.isArray(doc.categories)) {
+      doc.categories.forEach((c) => {
+        const cId = extractIdString(c);
+        if (isValidObjectId(cId)) idSet.add(cId);
+      });
+    }
   });
 
   const ids = Array.from(idSet);
@@ -553,6 +562,25 @@ export const enrichOffersWithProducts = async (rawOffers) => {
       computedProductLabel = resolvedProductNames.join(', ');
     } else if (item.products && item.products.length > 0) {
       computedProductLabel = item.products.join(', ');
+    }
+
+    let categoryInfo = null;
+    const catId = extractIdString(item.category);
+    if (catId && lookupMap.has(catId)) {
+      const catObj = lookupMap.get(catId);
+      categoryInfo = {
+        _id: catId,
+        id: catId,
+        name: catObj.name ? catObj.name.replace(/^All\s+/, '') : '',
+        categoryName: catObj.name ? catObj.name.replace(/^All\s+/, '') : '',
+      };
+    }
+    item.categoryName = categoryInfo?.name || (typeof item.category === 'object' ? item.category?.name : '') || '';
+    if (categoryInfo) {
+      item.category = categoryInfo;
+    }
+    if (item.appliesTo === 'category' && item.categoryName) {
+      computedProductLabel = `All ${item.categoryName}`;
     }
 
     item.product = computedProductLabel;

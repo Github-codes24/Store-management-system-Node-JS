@@ -115,6 +115,17 @@ const offerSchema = new mongoose.Schema(
       enum: ['all', 'category', 'product'],
       default: 'all',
     },
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
+      default: null,
+    },
+    categories: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+      },
+    ],
     products: [
       {
         type: String,

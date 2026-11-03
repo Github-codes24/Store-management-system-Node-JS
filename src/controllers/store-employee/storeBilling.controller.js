@@ -391,6 +391,7 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       const matchedOfferName = item.offerName || (promoPrice !== null ? (activePricingMap.get(String(storeProd._id))?.offerName || appliedOffer?.name) : '') || '';
       processedItems.push({
         product: storeProd._id,
+        category: storeProd.category,
         productName: item.productName || storeProd.productName,
         barcode: item.barcode || storeProd.barcode || '',
         batch: itemBatch,
@@ -468,6 +469,16 @@ export const createOrAppendOrderBill = async (req, res, next) => {
             .filter((pItem) => targetProductIds.includes(String(pItem.product)))
             .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
           finalDiscountAmount = parseFloat(((eligibleSubtotal * finalDiscountValue) / 100).toFixed(2));
+        } else if (appliedOffer.appliesTo === 'category' && (appliedOffer.category || (Array.isArray(appliedOffer.categories) && appliedOffer.categories.length > 0))) {
+          const targetCatId = String(appliedOffer.category?._id || appliedOffer.category || '');
+          const targetCatIds = [
+            ...(targetCatId ? [targetCatId] : []),
+            ...(Array.isArray(appliedOffer.categories) ? appliedOffer.categories.map((c) => String(c?._id || c)) : []),
+          ];
+          const eligibleSubtotal = processedItems
+            .filter((pItem) => targetCatIds.includes(String(pItem.category?._id || pItem.category || '')))
+            .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
+          finalDiscountAmount = parseFloat(((eligibleSubtotal * finalDiscountValue) / 100).toFixed(2));
         } else {
           finalDiscountAmount = parseFloat(((finalSubtotal * finalDiscountValue) / 100).toFixed(2));
         }
@@ -481,6 +492,16 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         if (appliedOffer.appliesTo === 'product' && targetProductIds.length > 0) {
           const eligibleSubtotal = processedItems
             .filter((pItem) => targetProductIds.includes(String(pItem.product)))
+            .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
+          finalDiscountAmount = Math.min(eligibleSubtotal, finalDiscountValue);
+        } else if (appliedOffer.appliesTo === 'category' && (appliedOffer.category || (Array.isArray(appliedOffer.categories) && appliedOffer.categories.length > 0))) {
+          const targetCatId = String(appliedOffer.category?._id || appliedOffer.category || '');
+          const targetCatIds = [
+            ...(targetCatId ? [targetCatId] : []),
+            ...(Array.isArray(appliedOffer.categories) ? appliedOffer.categories.map((c) => String(c?._id || c)) : []),
+          ];
+          const eligibleSubtotal = processedItems
+            .filter((pItem) => targetCatIds.includes(String(pItem.category?._id || pItem.category || '')))
             .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
           finalDiscountAmount = Math.min(eligibleSubtotal, finalDiscountValue);
         } else {
