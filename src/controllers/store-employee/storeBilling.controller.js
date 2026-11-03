@@ -240,25 +240,34 @@ export const createOrAppendOrderBill = async (req, res, next) => {
     if (!appliedOffer && storeId) {
       try {
         const Offer = (await import('../../models/offer.model.js')).default;
-        const itemProdIds = items.map((i) => i.product || i.productId || i._id).filter(Boolean);
-        appliedOffer = await Offer.findOne({
-          status: 'active',
-          isDeleted: false,
-          validFrom: { $lte: endOfToday },
-          validTo: { $gte: startOfToday },
-          $and: [
-            { $or: [{ stores: storeId }, { applyToAllStores: true }] },
-            {
-              $or: [
-                { 'productPricing.product': { $in: itemProdIds } },
-                { products: { $in: itemProdIds } },
-                { 'buyDetails.buyProduct': { $in: itemProdIds } },
-                { 'getFreeDetails.freeProduct': { $in: itemProdIds } },
-                { 'productPricing.0': { $exists: true } },
-              ],
-            },
-          ],
-        }).sort({ updatedAt: -1, createdAt: -1 });
+        const rawItemProdIds = items.map((i) => i.product || i.productId || i._id).filter(Boolean);
+        const itemProdIds = [];
+        rawItemProdIds.forEach((id) => {
+          itemProdIds.push(String(id));
+          if (mongoose.Types.ObjectId.isValid(id)) {
+            itemProdIds.push(new mongoose.Types.ObjectId(id));
+          }
+        });
+
+        if (itemProdIds.length > 0) {
+          appliedOffer = await Offer.findOne({
+            status: 'active',
+            isDeleted: false,
+            validFrom: { $lte: endOfToday },
+            validTo: { $gte: startOfToday },
+            $and: [
+              { $or: [{ stores: storeId }, { applyToAllStores: true }] },
+              {
+                $or: [
+                  { 'productPricing.product': { $in: itemProdIds } },
+                  { products: { $in: itemProdIds } },
+                  { 'buyDetails.buyProduct': { $in: itemProdIds } },
+                  { 'getFreeDetails.freeProduct': { $in: itemProdIds } },
+                ],
+              },
+            ],
+          }).sort({ updatedAt: -1, createdAt: -1 });
+        }
       } catch (e) {
         console.error('Error auto-detecting active pricing offer in billing:', e);
       }
@@ -450,8 +459,11 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       } else if (appliedOffer.discountType === 'percentage') {
         finalDiscountType = '%';
         finalDiscountValue = appliedOffer.discountValue || 0;
-        if (appliedOffer.appliesTo === 'product' && Array.isArray(appliedOffer.products) && appliedOffer.products.length > 0) {
-          const targetProductIds = appliedOffer.products.map(String);
+        const targetProductIds = [
+          ...(Array.isArray(appliedOffer.products) ? appliedOffer.products.map(String) : []),
+          ...(Array.isArray(appliedOffer.productPricing) ? appliedOffer.productPricing.map((pp) => String(pp.product)) : []),
+        ];
+        if (appliedOffer.appliesTo === 'product' && targetProductIds.length > 0) {
           const eligibleSubtotal = processedItems
             .filter((pItem) => targetProductIds.includes(String(pItem.product)))
             .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
@@ -462,8 +474,11 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       } else {
         finalDiscountType = '₹';
         finalDiscountValue = appliedOffer.discountValue || 0;
-        if (appliedOffer.appliesTo === 'product' && Array.isArray(appliedOffer.products) && appliedOffer.products.length > 0) {
-          const targetProductIds = appliedOffer.products.map(String);
+        const targetProductIds = [
+          ...(Array.isArray(appliedOffer.products) ? appliedOffer.products.map(String) : []),
+          ...(Array.isArray(appliedOffer.productPricing) ? appliedOffer.productPricing.map((pp) => String(pp.product)) : []),
+        ];
+        if (appliedOffer.appliesTo === 'product' && targetProductIds.length > 0) {
           const eligibleSubtotal = processedItems
             .filter((pItem) => targetProductIds.includes(String(pItem.product)))
             .reduce((sum, pItem) => sum + (pItem.totalAmount || (pItem.sellingPrice * pItem.quantity)), 0);
