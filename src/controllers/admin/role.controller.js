@@ -648,8 +648,8 @@ export const getStoreEmployeesDropdown = async (req, res, next) => {
  */
 export const getStoresDropdown = async (_req, res, next) => {
   try {
-    const stores = await Store.find({ isDeleted: false, status: 'active' })
-      .select('_id name storeCode location city state')
+    const stores = await Store.find({ isDeleted: false })
+      .select('_id name storeCode location mobile email')
       .sort({ name: 1 })
       .lean();
 
@@ -660,6 +660,9 @@ export const getStoresDropdown = async (_req, res, next) => {
       storeName: s.name,
       storeCode: s.storeCode,
       location: s.location || '',
+      value: s._id.toString(),
+      mobile: s.mobile || '',
+      email: s.email || '',
       city: s.city || '',
       label: `${s.name} (${s.storeCode || 'Code'})`,
     }));
