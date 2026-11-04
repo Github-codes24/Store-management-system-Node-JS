@@ -18,23 +18,40 @@ export const requireStorePermission = (moduleName, actionRequired = 'viewOnly') 
     const modulesToCheck = Array.isArray(moduleName) ? moduleName : [moduleName];
 
     // Special allowance for POS Billing workflow:
-    // If cashier has 'billing' permission, only allow barcode scanning and billing applicable offers
+    // If cashier has 'billing' permission, allow the counter helpers (product search, barcode scan, active offers, walk-in customer)
     const hasBillingPermission = Boolean(
       permissions.billing?.viewOnly ||
       permissions.billing?.create ||
       permissions.billing?.modify
     );
 
-    if (hasBillingPermission && req.method === 'GET') {
-      const isBarcodeScan =
-        Boolean(req.path && req.path.includes('/barcode/')) ||
-        Boolean(req.baseUrl && req.baseUrl.includes('/products') && req.path && req.path.includes('/barcode/'));
+    if (hasBillingPermission) {
+      // 1. Product lookup & barcode scan for billing counter
+      if (req.method === 'GET' && modulesToCheck.includes('productInventory')) {
+        // Cashier can search products and scan barcodes, but cannot export full inventory
+        if (!req.path?.includes('/export')) {
+          return next();
+        }
+      }
 
-      const isApplicableOffers =
-        Boolean(modulesToCheck.includes('offers') && req.path && (req.path.includes('applicable-offers') || req.path.includes('active')));
+      // 2. Active offers for billing (BOGO, BXGY, Special prices & Store-wide discounts)
+      if (req.method === 'GET' && modulesToCheck.includes('offers')) {
+        const isApplicableOffers = Boolean(
+          req.path?.includes('applicable-offers') ||
+          req.path?.includes('active') ||
+          req.query?.status === 'active' ||
+          String(req.originalUrl || '').includes('status=active')
+        );
+        if (isApplicableOffers) {
+          return next();
+        }
+      }
 
-      if (isBarcodeScan || isApplicableOffers) {
-        return next();
+      // 3. Customer search and quick walk-in customer creation at billing counter
+      if (modulesToCheck.includes('customers')) {
+        if (req.method === 'GET' || req.method === 'POST') {
+          return next();
+        }
       }
     }
 

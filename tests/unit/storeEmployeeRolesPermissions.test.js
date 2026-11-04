@@ -30,7 +30,7 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('should allow restricted employee (Cashier) to scan barcode during billing', () => {
+  it('should allow Cashier to scan barcode during billing', () => {
     const middleware = requireStorePermission('productInventory', 'viewOnly');
     const req = {
       method: 'GET',
@@ -47,26 +47,22 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('should block Cashier from general Product Inventory list (GET /products)', () => {
+  it('should allow Cashier to search products for POS billing autocomplete', () => {
     const middleware = requireStorePermission('productInventory', 'viewOnly');
     const req = {
       method: 'GET',
       path: '/',
+      query: { search: 'Test' },
       isFullAccess: false,
       permissions: {
         billing: { viewOnly: true, create: true },
       },
     };
     const res = {};
-    let errorPassed = null;
-    const next = jest.fn((err) => {
-      errorPassed = err;
-    });
+    const next = jest.fn();
 
     middleware(req, res, next);
-    expect(errorPassed).toBeDefined();
-    expect(errorPassed.status).toBe(403);
-    expect(errorPassed.message).toContain('Access denied');
+    expect(next).toHaveBeenCalledWith();
   });
 
   it('should block Cashier from mutating inventory (POST /products)', () => {
@@ -90,6 +86,115 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(errorPassed.message).toContain('Access denied');
   });
 
+  it('should block Cashier from exporting inventory list', () => {
+    const middleware = requireStorePermission('productInventory', 'viewOnly');
+    const req = {
+      method: 'GET',
+      path: '/export',
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const res = {};
+    let errorPassed = null;
+    const next = jest.fn((err) => {
+      errorPassed = err;
+    });
+
+    middleware(req, res, next);
+    expect(errorPassed).toBeDefined();
+    expect(errorPassed.status).toBe(403);
+  });
+
+  it('should allow Cashier to fetch active offers for BOGO and billing discounts (GET /offers?status=active)', () => {
+    const middleware = requireStorePermission('offers', 'viewOnly');
+    const req = {
+      method: 'GET',
+      path: '/',
+      query: { status: 'active' },
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const res = {};
+    const next = jest.fn();
+
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('should allow Cashier to fetch applicable-offers endpoint', () => {
+    const middleware = requireStorePermission('offers', 'viewOnly');
+    const req = {
+      method: 'GET',
+      path: '/applicable-offers',
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const res = {};
+    const next = jest.fn();
+
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('should block Cashier from general Offers management list (GET /offers without active)', () => {
+    const middleware = requireStorePermission('offers', 'viewOnly');
+    const req = {
+      method: 'GET',
+      path: '/',
+      query: {},
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const res = {};
+    let errorPassed = null;
+    const next = jest.fn((err) => {
+      errorPassed = err;
+    });
+
+    middleware(req, res, next);
+    expect(errorPassed).toBeDefined();
+    expect(errorPassed.status).toBe(403);
+  });
+
+  it('should allow Cashier to search and add walk-in customers at counter', () => {
+    const getMiddleware = requireStorePermission('customers', 'viewOnly');
+    const postMiddleware = requireStorePermission('customers', 'create');
+
+    const reqGet = {
+      method: 'GET',
+      path: '/',
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const reqPost = {
+      method: 'POST',
+      path: '/',
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+
+    const nextGet = jest.fn();
+    const nextPost = jest.fn();
+
+    getMiddleware(reqGet, {}, nextGet);
+    postMiddleware(reqPost, {}, nextPost);
+
+    expect(nextGet).toHaveBeenCalledWith();
+    expect(nextPost).toHaveBeenCalledWith();
+  });
+
   it('should block Cashier from accessing Reports module', () => {
     const middleware = requireStorePermission('reports', 'viewOnly');
     const req = {
@@ -110,12 +215,11 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(errorPassed.status).toBe(403);
   });
 
-  it('should block Cashier from accessing Offers module', () => {
-    const middleware = requireStorePermission('offers', 'viewOnly');
+  it('should block Cashier from accessing Dashboard module', () => {
+    const middleware = requireStorePermission('dashboard', 'viewOnly');
     const req = {
       method: 'GET',
       isFullAccess: false,
-      path: '/offers',
       permissions: {
         billing: { viewOnly: true, create: true },
       },
