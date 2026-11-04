@@ -18,29 +18,24 @@ export const requireStorePermission = (moduleName, actionRequired = 'viewOnly') 
     const modulesToCheck = Array.isArray(moduleName) ? moduleName : [moduleName];
 
     // Special allowance for POS Billing workflow:
-    // If cashier has 'billing' permission, allow GET requests for product lookup, customer lookup, and applicable offers
+    // If cashier has 'billing' permission, only allow barcode scanning and billing applicable offers
     const hasBillingPermission = Boolean(
       permissions.billing?.viewOnly ||
       permissions.billing?.create ||
-      permissions.billing?.modify ||
-      permissions.offlineSales?.viewOnly
+      permissions.billing?.modify
     );
 
     if (hasBillingPermission && req.method === 'GET') {
-      const isPosLookup =
-        modulesToCheck.includes('productInventory') ||
-        modulesToCheck.includes('customers') ||
-        (modulesToCheck.includes('offers') && req.path?.includes('active')) ||
-        (modulesToCheck.includes('offers') && req.path?.includes('applicable-offers'));
+      const isBarcodeScan =
+        Boolean(req.path && req.path.includes('/barcode/')) ||
+        Boolean(req.baseUrl && req.baseUrl.includes('/products') && req.path && req.path.includes('/barcode/'));
 
-      if (isPosLookup) {
+      const isApplicableOffers =
+        Boolean(modulesToCheck.includes('offers') && req.path && (req.path.includes('applicable-offers') || req.path.includes('active')));
+
+      if (isBarcodeScan || isApplicableOffers) {
         return next();
       }
-    }
-
-    // Cashier creating walk-in customer at billing counter
-    if (hasBillingPermission && req.method === 'POST' && modulesToCheck.includes('customers')) {
-      return next();
     }
 
     let hasModuleAccess = false;

@@ -24,7 +24,20 @@ router.use(requireStorePermission('billing', 'viewOnly'));
 
 // Billing endpoints
 router.post('/bills', createOrAppendOrderBill);
-router.get('/orders', getStoreOrders);
+router.get(
+  '/orders',
+  (req, res, next) => {
+    const saleType = String(req.query.saleType || '').toLowerCase();
+    if (saleType === 'online') {
+      return requireStorePermission('onlineOrders', 'viewOnly')(req, res, next);
+    }
+    if (saleType === 'offline') {
+      return requireStorePermission('offlineSales', 'viewOnly')(req, res, next);
+    }
+    return next();
+  },
+  getStoreOrders
+);
 router.get('/orders/:id', getOrderById);
 router.patch('/orders/:id/status', updateOrderStatus);
 router.delete('/orders/:id', deleteStoreOrder);

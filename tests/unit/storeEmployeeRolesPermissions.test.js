@@ -30,10 +30,11 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('should allow restricted employee (Cashier) to search/lookup products during billing', () => {
+  it('should allow restricted employee (Cashier) to scan barcode during billing', () => {
     const middleware = requireStorePermission('productInventory', 'viewOnly');
     const req = {
       method: 'GET',
+      path: '/barcode/8901234567890',
       isFullAccess: false,
       permissions: {
         billing: { viewOnly: true, create: true },
@@ -44,6 +45,28 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
 
     middleware(req, res, next);
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('should block Cashier from general Product Inventory list (GET /products)', () => {
+    const middleware = requireStorePermission('productInventory', 'viewOnly');
+    const req = {
+      method: 'GET',
+      path: '/',
+      isFullAccess: false,
+      permissions: {
+        billing: { viewOnly: true, create: true },
+      },
+    };
+    const res = {};
+    let errorPassed = null;
+    const next = jest.fn((err) => {
+      errorPassed = err;
+    });
+
+    middleware(req, res, next);
+    expect(errorPassed).toBeDefined();
+    expect(errorPassed.status).toBe(403);
+    expect(errorPassed.message).toContain('Access denied');
   });
 
   it('should block Cashier from mutating inventory (POST /products)', () => {
