@@ -1,6 +1,7 @@
 import StoreOrder from '../../models/storeOrder.model.js';
 import StoreProduct from '../../models/storeProduct.model.js';
 import Customer from '../../models/customer.model.js';
+import Offer from '../../models/offer.model.js';
 import { successResponse } from '../../utils/api-response.js';
 import { badRequest, notFound } from '../../utils/api-error.js';
 import { createCustomerNotificationHelper } from '../customer/customerNotification.controller.js';
@@ -1214,21 +1215,41 @@ export const lookupBillForReturn = async (req, res, next) => {
       );
     }
 
-    // Process orders to calculate returnable quantities for each item
+    // Process orders to calculate returnable quantities and offer-aware refund details for each item
     const formattedOrders = orders.map((order) => {
       const processedBills = (order.bills || []).map((bill) => {
+        const alreadyRefundedOnBill = (order.returns || [])
+          .filter((r) => r.billId === bill.billId || r.billId === bill.orderId)
+          .reduce((sum, r) => sum + (Number(r.totalRefundAmount) || 0), 0);
+        const billPaidAmount = Number(bill.paidAmount) || Number(bill.netAmount) || 0;
+        const maxRefundableAmount = Math.max(0, billPaidAmount - alreadyRefundedOnBill);
+
+        // Effective discount value for frontend dropdowns:
+        // For BOGO/BXGY/₹, if discountValue is 0, provide discountAmount so frontend does not show 0 discount
+        const effectiveDiscountValue = (bill.discountValue && Number(bill.discountValue) > 0)
+          ? bill.discountValue
+          : (['BOGO', 'BXGY', '₹'].includes(bill.discountType) ? (bill.discountAmount || 0) : 0);
+
+        const isBogo = bill.discountType === 'BOGO';
+        const isBxgy = bill.discountType === 'BXGY';
+
         const processedItems = (bill.items || []).map((item) => {
           const availableToReturn = Math.max(0, (item.quantity || 0) - (item.returnedQuantity || 0));
           return {
             ...item,
             availableToReturn,
             isReturnable: availableToReturn > 0,
+            isBogo,
+            isBxgy,
           };
         });
 
         const canReturnAny = processedItems.some((it) => it.isReturnable);
         return {
           ...bill,
+          discountValue: effectiveDiscountValue,
+          alreadyRefunded: alreadyRefundedOnBill,
+          maxRefundableAmount,
           items: processedItems,
           canReturnAny,
         };
@@ -1293,10 +1314,35 @@ export const processBillReturn = async (req, res, next) => {
     const returnNumber = (order.returns?.length || 0) + 1;
     const returnId = generateReturnId(order.orderId, returnNumber);
 
-    const processedReturnItems = [];
-    let totalRefund = 0;
+    // Calculate remaining refundable amount on this bill
+    const alreadyRefundedOnBill = (order.returns || [])
+      .filter((r) => r.billId === targetBill.billId || r.billId === targetBill.orderId)
+      .reduce((sum, r) => sum + (Number(r.totalRefundAmount) || 0), 0);
+    const billPaidAmount = Number(targetBill.paidAmount) || Number(targetBill.netAmount) || 0;
+    const maxPossibleBillRefund = Math.max(0, billPaidAmount - alreadyRefundedOnBill);
+
+    const isBogoBill = targetBill.discountType === 'BOGO';
+    const isBxgyBill = targetBill.discountType === 'BXGY';
+
+    let appliedOffer = null;
+    if (targetBill.offerId) {
+      appliedOffer = await Offer.findById(targetBill.offerId).lean().catch(() => null);
+    }
 
     const getItemProdId = (p) => (p && p._id ? p._id.toString() : p ? p.toString() : '');
+
+    // Identify BXGY free product vs buy product if applicable
+    let bxgyFreeProdId = appliedOffer?.getFreeDetails?.freeProduct ? String(appliedOffer.getFreeDetails.freeProduct) : null;
+    let bxgyBuyProdId = appliedOffer?.buyDetails?.buyProduct ? String(appliedOffer.buyDetails.buyProduct) : null;
+
+    if (isBxgyBill && !bxgyFreeProdId) {
+      const matchFree = targetBill.items.find(
+        (it) => it.totalAmount === targetBill.discountAmount || it.sellingPrice === targetBill.discountAmount
+      );
+      if (matchFree) bxgyFreeProdId = getItemProdId(matchFree.product);
+    }
+
+    const processedReturnItems = [];
 
     for (const returnReq of items) {
       const returnQty = parseInt(returnReq.quantity, 10) || 0;
@@ -1332,7 +1378,55 @@ export const processBillReturn = async (req, res, next) => {
       }
 
       const unitPrice = parseFloat(billItem.sellingPrice) || 0;
-      const refundAmt = parseFloat(returnReq.refundAmount) || (returnQty * unitPrice);
+      let refundAmt = 0;
+
+      if (isBogoBill) {
+        // BOGO Rule: Customer must return complete pairs (both items) to receive refund. Single item return gets ₹0 refund.
+        const totalPurchasedQty = billItem.quantity || 2;
+        const setSize = 2; // Buy 1 Get 1 = 2 items per pair
+        const completePairsReturned = Math.floor(returnQty / setSize);
+        const totalSets = Math.floor(totalPurchasedQty / setSize) || 1;
+
+        if (completePairsReturned > 0) {
+          const refundPerSet = billPaidAmount / totalSets;
+          refundAmt = Math.min(
+            parseFloat((completePairsReturned * refundPerSet).toFixed(2)),
+            maxPossibleBillRefund
+          );
+        } else {
+          // Returning incomplete set (e.g. only 1 item out of 2) -> ₹0 refund
+          refundAmt = 0;
+        }
+      } else if (isBxgyBill) {
+        // BXGY Rule: Free items have 0 refund value.
+        const itProdId = getItemProdId(billItem.product);
+        const isFreeItem = bxgyFreeProdId && itProdId === bxgyFreeProdId;
+
+        if (isFreeItem) {
+          refundAmt = 0;
+        } else {
+          // Buy item: Only refundable if the free item is also being returned in this request
+          const returningFreeItem = items.some((req) => {
+            const rId = getItemProdId(req.product);
+            return (rId && rId === bxgyFreeProdId) || (bxgyFreeProdId && req.productName && req.productName.toLowerCase().includes('free'));
+          });
+
+          if (returningFreeItem) {
+            refundAmt = Math.min(billPaidAmount, maxPossibleBillRefund);
+          } else {
+            // Keeping free item without paid item -> ₹0 refund
+            refundAmt = 0;
+          }
+        }
+      } else {
+        // Standard / Non-Offer Bill
+        const reqRefund = parseFloat(returnReq.refundAmount);
+        if (!isNaN(reqRefund) && reqRefund >= 0) {
+          refundAmt = reqRefund;
+        } else {
+          refundAmt = returnQty * unitPrice;
+        }
+      }
 
       // 1. Update returned quantity on bill item in invoice
       billItem.returnedQuantity = (billItem.returnedQuantity || 0) + returnQty;
@@ -1396,12 +1490,20 @@ export const processBillReturn = async (req, res, next) => {
         refundAmount: refundAmt,
         reason: returnReq.reason || 'Customer Return',
       });
-
-      totalRefund += refundAmt;
     }
 
     if (processedReturnItems.length === 0) {
       return next(badRequest('No valid return items provided'));
+    }
+
+    // Universal Safeguard: Total refund can never exceed remaining paid amount on bill
+    let totalRefund = processedReturnItems.reduce((sum, it) => sum + (Number(it.refundAmount) || 0), 0);
+    if (totalRefund > maxPossibleBillRefund) {
+      const capRatio = totalRefund > 0 ? (maxPossibleBillRefund / totalRefund) : 0;
+      for (const it of processedReturnItems) {
+        it.refundAmount = parseFloat((it.refundAmount * capRatio).toFixed(2));
+      }
+      totalRefund = maxPossibleBillRefund;
     }
 
     const returnRecord = {
