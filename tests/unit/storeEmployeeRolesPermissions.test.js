@@ -234,4 +234,38 @@ describe('Store Employee Roles & Permissions Unit Tests', () => {
     expect(errorPassed).toBeDefined();
     expect(errorPassed.status).toBe(403);
   });
+
+  it('should allow Sales Associate with onlineOrders permission (and billing: false) to access online orders', () => {
+    const middleware = requireStorePermission(['billing', 'offlineSales', 'onlineOrders'], 'viewOnly');
+    const req = {
+      method: 'GET',
+      isFullAccess: false,
+      permissions: {
+        onlineOrders: { viewOnly: true, modifyStatus: true },
+        billing: { viewOnly: false, create: false },
+      },
+    };
+    const res = {};
+    const next = jest.fn();
+
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('should allow employee with offlineSales permission (and billing: false) to access offline sales', () => {
+    const middleware = requireStorePermission(['offlineSales', 'billing'], 'viewOnly');
+    const req = {
+      method: 'GET',
+      isFullAccess: false,
+      permissions: {
+        offlineSales: { viewOnly: true },
+        billing: { viewOnly: false },
+      },
+    };
+    const res = {};
+    const next = jest.fn();
+
+    middleware(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
 });

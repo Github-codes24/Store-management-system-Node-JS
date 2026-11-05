@@ -18,12 +18,24 @@ import requireStorePermission from '../../middlewares/storePermission.middleware
 
 const router = Router();
 
-// Apply store employee auth middleware and billing module permission
+// Apply store employee authentication
 router.use(storeEmployeeAuth);
-router.use(requireStorePermission('billing', 'viewOnly'));
 
-// Billing endpoints
-router.post('/bills', createOrAppendOrderBill);
+// Billing endpoints (strictly for Billing module)
+router.post('/bills', requireStorePermission('billing', 'create'), createOrAppendOrderBill);
+router.get('/customers', requireStorePermission(['billing', 'customers'], 'viewOnly'), getStoreCustomers);
+router.post('/customers', requireStorePermission(['billing', 'customers'], 'create'), createStoreCustomer);
+router.get('/applicable-offers', requireStorePermission(['billing', 'offers'], 'viewOnly'), getStoreBillingApplicableOffers);
+
+// Dynamic POS QR Code Billing endpoints
+router.post('/generate-qr', requireStorePermission('billing', 'create'), generatePosBillingQrCode);
+router.get('/qr-status/:qrId', requireStorePermission('billing', 'viewOnly'), checkPosBillingQrStatus);
+
+// Returns endpoints
+router.get('/lookup-bill/:identifier', requireStorePermission('billing', 'viewOnly'), lookupBillForReturn);
+router.post('/returns', requireStorePermission('billing', 'create'), processBillReturn);
+
+// Orders & Sales endpoints (shared between onlineOrders, offlineSales, and billing)
 router.get(
   '/orders',
   (req, res, next) => {
@@ -32,25 +44,29 @@ router.get(
       return requireStorePermission('onlineOrders', 'viewOnly')(req, res, next);
     }
     if (saleType === 'offline') {
-      return requireStorePermission('offlineSales', 'viewOnly')(req, res, next);
+      return requireStorePermission(['offlineSales', 'billing'], 'viewOnly')(req, res, next);
     }
-    return next();
+    return requireStorePermission(['billing', 'offlineSales', 'onlineOrders'], 'viewOnly')(req, res, next);
   },
   getStoreOrders
 );
-router.get('/orders/:id', getOrderById);
-router.patch('/orders/:id/status', updateOrderStatus);
-router.delete('/orders/:id', deleteStoreOrder);
-router.get('/customers', getStoreCustomers);
-router.post('/customers', createStoreCustomer);
-router.get('/applicable-offers', getStoreBillingApplicableOffers);
 
-// Dynamic POS QR Code Billing endpoints
-router.post('/generate-qr', generatePosBillingQrCode);
-router.get('/qr-status/:qrId', checkPosBillingQrStatus);
+router.get(
+  '/orders/:id',
+  requireStorePermission(['billing', 'offlineSales', 'onlineOrders'], 'viewOnly'),
+  getOrderById
+);
 
-// Returns endpoints
-router.get('/lookup-bill/:identifier', lookupBillForReturn);
-router.post('/returns', processBillReturn);
+router.patch(
+  '/orders/:id/status',
+  requireStorePermission(['billing', 'onlineOrders', 'offlineSales'], 'modify'),
+  updateOrderStatus
+);
+
+router.delete(
+  '/orders/:id',
+  requireStorePermission(['billing', 'offlineSales', 'onlineOrders'], 'delete'),
+  deleteStoreOrder
+);
 
 export default router;
