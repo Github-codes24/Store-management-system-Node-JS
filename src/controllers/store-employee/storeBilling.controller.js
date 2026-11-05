@@ -276,10 +276,9 @@ export const createOrAppendOrderBill = async (req, res, next) => {
 
     const activePricingMap = await getActiveProductPricingMap(storeId);
 
-    // Verify products and deduct stock from selected batch
-    const processedItems = [];
-    let autoComputedGross = 0;
-    let autoComputedSubtotal = 0;
+    // PHASE 1: PRE-VALIDATION (Check product existence & stock sufficiency BEFORE mutating anything)
+    const resolvedCartItems = [];
+    const productQtyMap = new Map(); // prodIdStr -> { totalRequestedQty, storeProd }
 
     for (const item of items) {
       let storeProd = null;
@@ -297,7 +296,6 @@ export const createOrAppendOrderBill = async (req, res, next) => {
         return next(notFound(`Product "${item.productName || item.product}" not found in store inventory`));
       }
 
-      const itemBatch = (item.batch || storeProd.batch || 'Default').trim();
       let rawQty = Number(item.quantity);
       if (isNaN(rawQty) || rawQty <= 0) rawQty = 1;
       if (rawQty > 9999) {
@@ -305,6 +303,42 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
       const qty = Math.floor(rawQty);
 
+      const prodIdStr = String(storeProd._id);
+      if (productQtyMap.has(prodIdStr)) {
+        productQtyMap.get(prodIdStr).totalRequestedQty += qty;
+      } else {
+        productQtyMap.set(prodIdStr, {
+          totalRequestedQty: qty,
+          storeProd,
+        });
+      }
+
+      resolvedCartItems.push({
+        item,
+        storeProd,
+        qty,
+      });
+    }
+
+    // Check stock sufficiency for each unique product
+    for (const [prodIdStr, { totalRequestedQty, storeProd }] of productQtyMap.entries()) {
+      const availableStock = Number(storeProd.stockQuantity) || 0;
+      if (availableStock < totalRequestedQty) {
+        return next(
+          badRequest(
+            `Insufficient stock for "${storeProd.productName}". Available stock: ${availableStock}, Requested: ${totalRequestedQty}. Please adjust quantity.`
+          )
+        );
+      }
+    }
+
+    // PHASE 2: DEDUCTION & ITEM PROCESSING
+    const processedItems = [];
+    let autoComputedGross = 0;
+    let autoComputedSubtotal = 0;
+
+    for (const { item, storeProd, qty } of resolvedCartItems) {
+      const itemBatch = (item.batch || storeProd.batch || 'Default').trim();
       const itemMrp = parseFloat(item.mrp !== undefined ? item.mrp : (storeProd.mrp || 0));
       let unitPrice = parseFloat(item.sellingPrice !== undefined ? item.sellingPrice : (storeProd.offlineSellingPrice || storeProd.onlineSellingPrice || storeProd.mrp || 0));
       let isPromotionalPricing = false;
@@ -347,24 +381,30 @@ export const createOrAppendOrderBill = async (req, res, next) => {
 
       // Decrement stock from specific batch in storeProduct
       const cleanBatch = itemBatch.replace(/\s*\(Offer:.*?\)/i, '').trim();
+      const isDefaultOrEmptyBatch = !cleanBatch || cleanBatch.toLowerCase() === 'default' || cleanBatch.toLowerCase().includes('default');
+
       if (Array.isArray(storeProd.batches) && storeProd.batches.length > 0) {
         let batchIndex = storeProd.batches.findIndex(
           (b) => (b.batchNumber || '').trim().toLowerCase() === cleanBatch.toLowerCase()
         );
 
-        if (batchIndex < 0 && (cleanBatch.toLowerCase() === 'default' || !cleanBatch || cleanBatch.toLowerCase().includes('default'))) {
-          batchIndex = storeProd.batches.findIndex((b) => (Number(b.stockQuantity) || 0) > 0);
-        }
-
-        if (batchIndex < 0) {
-          batchIndex = 0;
-        }
-
-        if (batchIndex >= 0 && storeProd.batches[batchIndex]) {
+        if (batchIndex >= 0 && !isDefaultOrEmptyBatch) {
+          // Specific non-default batch specified: deduct from this batch
           storeProd.batches[batchIndex].stockQuantity = Math.max(
             0,
             (Number(storeProd.batches[batchIndex].stockQuantity) || 0) - qty
           );
+        } else {
+          // Default batch or general scan: deduct FIFO across active batches
+          let remainingToDeduct = qty;
+          for (const b of storeProd.batches) {
+            if (remainingToDeduct <= 0) break;
+            const bStock = Number(b.stockQuantity) || 0;
+            if (bStock <= 0) continue;
+            const deductAmt = Math.min(bStock, remainingToDeduct);
+            b.stockQuantity = bStock - deductAmt;
+            remainingToDeduct -= deductAmt;
+          }
         }
 
         // Clean up / remove batches that have 0 stock
