@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import env from './env.js';
 
 let isConnected = false;
-
+//asda
 const connectDB = async () => {
   try {
     if (isConnected || mongoose.connection.readyState === 1) {
