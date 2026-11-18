@@ -52,12 +52,13 @@ const formatProductSummary = (items) => {
 };
 
 /**
- * Calculate payment stats (Cash, UPI, Card) from offline orders
+ * Calculate payment stats (Cash, UPI, Card) and Profit from offline orders
  */
 const calculateOrderPaymentStats = (orders = []) => {
   let totalCash = 0;
   let totalUPI = 0;
   let totalCard = 0;
+  let totalProfit = 0;
 
   for (const o of orders) {
     let oCash = 0;
@@ -69,21 +70,25 @@ const calculateOrderPaymentStats = (orders = []) => {
       ? o.bills[0].payments
       : [];
 
+    const firstBill = o.bills?.[0] || {};
+    const netAmount = Number(firstBill.netAmount ?? o.totalOrderNet ?? 0);
+    const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
+    const effective = Math.max(0, netAmount - refunded);
+    const safeNet = netAmount > 0 ? netAmount : 1000000;
+
     if (paymentsList.length > 0) {
       for (const p of paymentsList) {
         const mode = (p.mode || '').trim().toLowerCase();
-        const amt = Number(p.amount) || 0;
+        // Sanitize payment amount against netAmount or reasonable cap to prevent data corruption
+        const amt = Math.min(Math.max(0, Number(p.amount) || 0), safeNet);
         if (mode === 'cash') oCash += amt;
         else if (mode === 'upi') oUpi += amt;
         else if (mode === 'card' || mode.includes('card')) oCard += amt;
       }
     }
 
-    const firstBill = o.bills?.[0] || {};
-    const netAmount = Number(firstBill.netAmount ?? o.totalOrderNet ?? 0);
-    const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
-    const effective = Math.max(0, netAmount - refunded);
-    const paid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effective);
+    const rawPaid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effective);
+    const paid = Math.min(Math.max(0, rawPaid), safeNet);
 
     if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
       const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
@@ -93,19 +98,45 @@ const calculateOrderPaymentStats = (orders = []) => {
       else if (effective > 0) oCash = paid;
     }
 
-    if (refunded > 0 && effective >= 0) {
-      const recorded = oCash + oUpi + oCard;
-      if (recorded > effective && recorded > 0) {
-        const ratio = effective / recorded;
-        oCash *= ratio;
-        oUpi *= ratio;
-        oCard *= ratio;
-      }
+    const maxPayable = effective > 0 ? effective : (netAmount > 0 ? netAmount : 0);
+    const recorded = oCash + oUpi + oCard;
+    if (maxPayable > 0 && recorded > maxPayable) {
+      const ratio = maxPayable / recorded;
+      oCash *= ratio;
+      oUpi *= ratio;
+      oCard *= ratio;
     }
 
     totalCash += oCash;
     totalUPI += oUpi;
     totalCard += oCard;
+
+    // Profit calculation for order
+    let orderNetRevenue = 0;
+    let orderCost = 0;
+    const bills = Array.isArray(o.bills) && o.bills.length > 0 ? o.bills : [];
+    if (bills.length > 0) {
+      for (const b of bills) {
+        const bNet = Number(b.netAmount ?? 0);
+        const bRefunded = Number(b.totalRefunded ?? 0);
+        orderNetRevenue += Math.max(0, bNet - bRefunded);
+
+        const items = Array.isArray(b.items) ? b.items : [];
+        for (const it of items) {
+          const qty = Math.max(0, Number(it.quantity || 1) - Number(it.returnedQuantity || 0));
+          if (qty <= 0) continue;
+          const costPerUnit = it.purchasePrice !== undefined && !isNaN(Number(it.purchasePrice)) && Number(it.purchasePrice) > 0
+            ? Number(it.purchasePrice)
+            : (it.sellingPrice ? Number(it.sellingPrice) * 0.67 : 0);
+          orderCost += qty * costPerUnit;
+        }
+      }
+    } else {
+      orderNetRevenue += effective;
+    }
+
+    const orderProfit = Math.max(0, orderNetRevenue - orderCost);
+    totalProfit += orderProfit;
   }
 
   return {
@@ -113,6 +144,7 @@ const calculateOrderPaymentStats = (orders = []) => {
     totalUPI: Math.round(totalUPI * 100) / 100,
     totalCard: Math.round(totalCard * 100) / 100,
     totalAmount: Math.round((totalCash + totalUPI + totalCard) * 100) / 100,
+    totalProfit: Math.round(totalProfit * 100) / 100,
   };
 };
 
@@ -210,14 +242,14 @@ export const getAdminOfflineSales = async (req, res, next) => {
         .limit(queryLimit)
         .lean(),
       StoreOrder.find(filter)
-        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded bills.items totalOrderPaid totalOrderNet totalOrderRefunded')
         .lean(),
       StoreOrder.find(todayFilter)
-        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+        .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded bills.items totalOrderPaid totalOrderNet totalOrderRefunded')
         .lean(),
       isTodayRequested
         ? StoreOrder.find(allTimeFilter)
-            .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded totalOrderPaid totalOrderNet totalOrderRefunded')
+            .select('payments bills.payments bills.paymentMethod bills.paidAmount bills.netAmount bills.totalRefunded bills.items totalOrderPaid totalOrderNet totalOrderRefunded')
             .lean()
         : Promise.resolve(null),
     ]);
@@ -231,12 +263,14 @@ export const getAdminOfflineSales = async (req, res, next) => {
       todayUPI: todayStatsRaw.totalUPI,
       todayCard: todayStatsRaw.totalCard,
       todayTotal: todayStatsRaw.totalAmount,
+      todayProfit: todayStatsRaw.totalProfit,
     };
 
     const activeCash = isTodayRequested ? todayStats.todayCash : overallStats.totalCash;
     const activeUPI = isTodayRequested ? todayStats.todayUPI : overallStats.totalUPI;
     const activeCard = isTodayRequested ? todayStats.todayCard : overallStats.totalCard;
     const activeTotal = isTodayRequested ? todayStats.todayTotal : overallStats.totalAmount;
+    const activeProfit = isTodayRequested ? todayStats.todayProfit : overallStats.totalProfit;
 
     const data = ordersRaw.map((o) => {
       const allItems = o.bills?.flatMap((b) => b.items || []) || [];
@@ -253,20 +287,23 @@ export const getAdminOfflineSales = async (req, res, next) => {
         ? o.bills[0].payments
         : [];
 
+      const firstBill = o.bills?.[0] || {};
+      const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
+      const effectiveTotal = Math.max(0, totalBill - refunded);
+      const safeTotal = totalBill > 0 ? totalBill : 1000000;
+
       if (paymentsList.length > 0) {
         for (const p of paymentsList) {
           const mode = (p.mode || '').trim().toLowerCase();
-          const amt = Number(p.amount) || 0;
+          const amt = Math.min(Math.max(0, Number(p.amount) || 0), safeTotal);
           if (mode === 'cash') oCash += amt;
           else if (mode === 'upi') oUpi += amt;
           else if (mode === 'card' || mode.includes('card')) oCard += amt;
         }
       }
 
-      const firstBill = o.bills?.[0] || {};
-      const refunded = Number(firstBill.totalRefunded || o.totalOrderRefunded || 0);
-      const effectiveTotal = Math.max(0, totalBill - refunded);
-      const paidAmount = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effectiveTotal);
+      const rawPaid = Number(firstBill.paidAmount ?? o.totalOrderPaid ?? effectiveTotal);
+      const paidAmount = Math.min(Math.max(0, rawPaid), safeTotal);
 
       if (oCash === 0 && oUpi === 0 && oCard === 0 && paidAmount > 0) {
         const method = (firstBill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
@@ -276,14 +313,13 @@ export const getAdminOfflineSales = async (req, res, next) => {
         else if (effectiveTotal > 0) oCash = paidAmount;
       }
 
-      if (refunded > 0 && effectiveTotal >= 0) {
-        const recorded = oCash + oUpi + oCard;
-        if (recorded > effectiveTotal && recorded > 0) {
-          const ratio = effectiveTotal / recorded;
-          oCash *= ratio;
-          oUpi *= ratio;
-          oCard *= ratio;
-        }
+      const maxRowPayable = effectiveTotal > 0 ? effectiveTotal : (totalBill > 0 ? totalBill : 0);
+      const recorded = oCash + oUpi + oCard;
+      if (maxRowPayable > 0 && recorded > maxRowPayable) {
+        const ratio = maxRowPayable / recorded;
+        oCash *= ratio;
+        oUpi *= ratio;
+        oCard *= ratio;
       }
 
       return {
@@ -324,20 +360,25 @@ export const getAdminOfflineSales = async (req, res, next) => {
           totalUPI: activeUPI,
           totalCard: activeCard,
           totalAmount: activeTotal,
+          totalProfit: activeProfit,
           todayCash: todayStats.todayCash,
           todayUPI: todayStats.todayUPI,
           todayCard: todayStats.todayCard,
           todayTotal: todayStats.todayTotal,
+          todayProfit: todayStats.todayProfit,
           allTimeCash: allTimeStatsRaw.totalCash,
           allTimeUPI: allTimeStatsRaw.totalUPI,
           allTimeCard: allTimeStatsRaw.totalCard,
           allTimeTotal: allTimeStatsRaw.totalAmount,
+          allTimeProfit: allTimeStatsRaw.totalProfit,
           formattedTotalCash: `₹ ${Math.round(activeCash).toLocaleString('en-IN')}`,
           formattedTotalUPI: `₹ ${Math.round(activeUPI).toLocaleString('en-IN')}`,
           formattedTotalCard: `₹ ${Math.round(activeCard).toLocaleString('en-IN')}`,
+          formattedTotalProfit: `₹ ${Math.round(activeProfit).toLocaleString('en-IN')}`,
           formattedTodayCash: `₹ ${Math.round(todayStats.todayCash).toLocaleString('en-IN')}`,
           formattedTodayUPI: `₹ ${Math.round(todayStats.todayUPI).toLocaleString('en-IN')}`,
           formattedTodayCard: `₹ ${Math.round(todayStats.todayCard).toLocaleString('en-IN')}`,
+          formattedTodayProfit: `₹ ${Math.round(todayStats.todayProfit).toLocaleString('en-IN')}`,
           isToday: isTodayRequested,
         },
         todayStats,

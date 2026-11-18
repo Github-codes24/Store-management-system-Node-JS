@@ -495,7 +495,7 @@ export const getSalesSummaryReport = async (req, res, next) => {
 
         for (const p of payments) {
           const mode = p.mode || 'Cash';
-          const amt = Number(p.amount || 0);
+          const amt = Math.min(Math.max(0, Number(p.amount || 0)), net > 0 ? net : 1000000);
           if (paymentModesMap[mode]) {
             paymentModesMap[mode].amount += amt;
             paymentModesMap[mode].count += 1;
