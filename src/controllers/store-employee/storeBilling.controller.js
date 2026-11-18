@@ -141,6 +141,28 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       return next(badRequest('Customer name is required for a new order'));
     }
 
+    // Early sanity check on payment amounts to prevent processing astronomical or negative values
+    if (Array.isArray(payments) && payments.length > 0) {
+      for (const p of payments) {
+        const pAmt = Number(p.amount) || 0;
+        if (isNaN(Number(p.amount)) || pAmt < 0 || pAmt > 1000000) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid payment amount for mode ${p.mode}: ₹${pAmt}. Payment cannot exceed bill amount.`
+          });
+        }
+      }
+    }
+    if (paidAmount !== undefined && paidAmount !== null && (!Array.isArray(payments) || payments.length === 0)) {
+      const pAmt = Number(paidAmount) || 0;
+      if (isNaN(Number(paidAmount)) || pAmt < 0 || pAmt > 1000000) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid payment amount for mode ${paymentMethod || 'Payment'}: ₹${pAmt}. Payment cannot exceed bill amount.`
+        });
+      }
+    }
+
     let order = null;
     let existingBillIndex = -1;
 
@@ -576,6 +598,29 @@ export const createOrAppendOrderBill = async (req, res, next) => {
       }
     }
 
+    // Payment amount sanity check
+    if (Array.isArray(payments) && payments.length > 0) {
+      for (const p of payments) {
+        const pAmt = Number(p.amount) || 0;
+        if (pAmt < 0 || pAmt > 1000000 || pAmt > (finalNetAmount * 2)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid payment amount for mode ${p.mode}: ₹${pAmt}. Payment cannot exceed bill amount.`
+          });
+        }
+      }
+    }
+
+    if (paidAmount !== undefined && paidAmount !== null && (!Array.isArray(payments) || payments.length === 0)) {
+      const pAmt = Number(paidAmount) || 0;
+      if (pAmt < 0 || pAmt > 1000000 || pAmt > (finalNetAmount * 2)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid payment amount for mode ${paymentMethod || 'Payment'}: ₹${pAmt}. Payment cannot exceed bill amount.`
+        });
+      }
+    }
+
     // Process payments array and calculate paid amount accurately
     const todayFormatted = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
     let processedPayments = [];
@@ -882,21 +927,25 @@ const calculateOrderPaymentStats = (statsOrders) => {
       ? o.bills[0].payments
       : [];
 
+    const bill = o.bills?.[0] || {};
+    const netAmount = Number(bill.netAmount ?? o.totalOrderNet ?? 0);
+    const refunded = Number(bill.totalRefunded || o.totalOrderRefunded || 0);
+    const effective = Math.max(0, netAmount - refunded);
+    const safeNet = netAmount > 0 ? netAmount : 1000000;
+
     if (paymentsList.length > 0) {
       for (const p of paymentsList) {
         const mode = (p.mode || '').trim().toLowerCase();
-        const amt = Number(p.amount) || 0;
+        // Sanitize payment amount against netAmount or reasonable cap to prevent data corruption
+        const amt = Math.min(Math.max(0, Number(p.amount) || 0), safeNet);
         if (mode === 'cash') oCash += amt;
         else if (mode === 'upi') oUpi += amt;
         else if (mode === 'card' || mode.includes('card')) oCard += amt;
       }
     }
 
-    const bill = o.bills?.[0] || {};
-    const netAmount = Number(bill.netAmount ?? o.totalOrderNet ?? 0);
-    const refunded = Number(bill.totalRefunded || o.totalOrderRefunded || 0);
-    const effective = Math.max(0, netAmount - refunded);
-    const paid = Number(bill.paidAmount ?? o.totalOrderPaid ?? effective);
+    const rawPaid = Number(bill.paidAmount ?? o.totalOrderPaid ?? effective);
+    const paid = Math.min(Math.max(0, rawPaid), safeNet);
 
     if (oCash === 0 && oUpi === 0 && oCard === 0 && paid > 0) {
       const method = (bill.paymentMethod || o.paymentMethod || '').trim().toLowerCase();
@@ -906,14 +955,13 @@ const calculateOrderPaymentStats = (statsOrders) => {
       else if (effective > 0) oCash = paid;
     }
 
-    if (refunded > 0 && effective >= 0) {
-      const recorded = oCash + oUpi + oCard;
-      if (recorded > effective && recorded > 0) {
-        const ratio = effective / recorded;
-        oCash *= ratio;
-        oUpi *= ratio;
-        oCard *= ratio;
-      }
+    const maxPayable = effective > 0 ? effective : (netAmount > 0 ? netAmount : 0);
+    const recorded = oCash + oUpi + oCard;
+    if (maxPayable > 0 && recorded > maxPayable) {
+      const ratio = maxPayable / recorded;
+      oCash *= ratio;
+      oUpi *= ratio;
+      oCard *= ratio;
     }
 
     totalCash += oCash;
