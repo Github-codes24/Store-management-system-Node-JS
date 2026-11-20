@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import StoreProduct from '../../models/storeProduct.model.js';
 import AdminProduct from '../../models/adminProduct.model.js';
 import Attribute from '../../models/attribute.model.js';
@@ -49,22 +50,62 @@ export const computeStockStatus = (product) => {
 };
 
 /**
- * Helper to build Mongoose filter query
+ * Helper to safely convert 24-char hex string to mongoose ObjectId
  */
-const buildStoreProductFilter = (queryParams, storeId = null) => {
+const toObjectId = (val) => {
+  if (!val) return null;
+  if (val instanceof mongoose.Types.ObjectId) return val;
+  if (typeof val === 'string' && mongoose.Types.ObjectId.isValid(val) && val.length === 24) {
+    return new mongoose.Types.ObjectId(val);
+  }
+  return val;
+};
+
+/**
+ * Resolves filter parameter:
+ * - If valid 24-char ObjectId string, casts to new mongoose.Types.ObjectId
+ * - If name string, looks up document in Model and returns its ObjectId
+ */
+const resolveFilterObjectId = async (Model, val) => {
+  if (!val || val === 'all' || (typeof val === 'string' && (val.toLowerCase() === 'all' || val.startsWith('All ')))) {
+    return undefined;
+  }
+  if (val instanceof mongoose.Types.ObjectId) return val;
+  if (typeof val === 'string' && mongoose.Types.ObjectId.isValid(val) && val.length === 24) {
+    return new mongoose.Types.ObjectId(val);
+  }
+  if (typeof val === 'string' && val.trim() !== '') {
+    const doc = await Model.findOne({ name: new RegExp(`^${val.trim()}$`, 'i'), isDeleted: { $ne: true } }).select('_id');
+    if (doc) return doc._id;
+  }
+  return undefined;
+};
+
+/**
+ * Helper to build Mongoose filter query with proper ObjectId casting for Aggregation pipelines
+ */
+const buildStoreProductFilter = async (queryParams, storeId = null) => {
   const { search, productType, category, subcategory, brand, status } = queryParams;
 
   const filter = { isDeleted: false };
 
   if (storeId) {
-    // Optionally scope by store
-    filter.$or = [{ storeId }, { storeId: null }];
+    // Optionally scope by store with proper ObjectId casting
+    const sId = toObjectId(storeId);
+    filter.$or = [{ storeId: sId }, { storeId: null }];
   }
 
-  if (productType) filter.productType = productType;
-  if (category) filter.category = category;
-  if (subcategory) filter.subcategory = subcategory;
-  if (brand) filter.brand = brand;
+  const [resPt, resCat, resSubcat, resBrand] = await Promise.all([
+    resolveFilterObjectId(ProductType, productType),
+    resolveFilterObjectId(Category, category),
+    resolveFilterObjectId(Subcategory, subcategory),
+    resolveFilterObjectId(Brand, brand),
+  ]);
+
+  if (resPt) filter.productType = resPt;
+  if (resCat) filter.category = resCat;
+  if (resSubcat) filter.subcategory = resSubcat;
+  if (resBrand) filter.brand = resBrand;
 
   if (search && search.trim() !== '') {
     const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -170,7 +211,7 @@ export const getStoreProducts = async (req, res, next) => {
     } = req.query;
 
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
-    const filter = buildStoreProductFilter(
+    const filter = await buildStoreProductFilter(
       { search, productType, category, subcategory, brand, status },
       storeId
     );
@@ -1123,7 +1164,7 @@ export const exportStoreProducts = async (req, res, next) => {
     const { search, productType, category, subcategory, brand, status = 'all', format = 'excel' } = req.query;
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
 
-    const filter = buildStoreProductFilter(
+    const filter = await buildStoreProductFilter(
       { search, productType, category, subcategory, brand, status },
       storeId
     );
