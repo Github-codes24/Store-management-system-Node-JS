@@ -85,7 +85,7 @@ const resolveFilterObjectId = async (Model, val) => {
  * Helper to build Mongoose filter query with proper ObjectId casting for Aggregation pipelines
  */
 const buildStoreProductFilter = async (queryParams, storeId = null) => {
-  const { search, productType, category, subcategory, brand, status } = queryParams;
+  const { search, productType, category, subcategory, brand, status, stockStatus } = queryParams;
 
   const filter = { isDeleted: false };
 
@@ -126,36 +126,126 @@ const buildStoreProductFilter = async (queryParams, storeId = null) => {
   }
 
   const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
+  // Helper to safely append $expr conditions without overwriting existing filter properties
+  const addExprCondition = (expr) => {
+    if (filter.$and) {
+      filter.$and.push({ $expr: expr });
+    } else if (filter.$expr) {
+      filter.$and = [{ $expr: filter.$expr }, { $expr: expr }];
+      delete filter.$expr;
+    } else {
+      filter.$expr = expr;
+    }
+  };
+
+  // 1. Product Status Filter (Toggle: Active / Inactive)
+  let resolvedStockStatus = stockStatus;
   if (status && status !== 'all' && status !== 'All Status' && status !== 'All Statuses') {
     const normalizedStatus = status.toLowerCase();
-    switch (normalizedStatus) {
+    if (normalizedStatus === 'active') {
+      filter.status = 'active';
+    } else if (normalizedStatus === 'inactive') {
+      filter.status = 'inactive';
+    } else if (!resolvedStockStatus || resolvedStockStatus === 'all' || resolvedStockStatus === 'All Stock Status') {
+      // Backward compatibility: if a stock status was passed in status
+      resolvedStockStatus = status;
+    }
+  }
+
+  // 2. Stock Health Status Filter (In Stock, Low Stock, Near Expiry, Out of Stock)
+  if (resolvedStockStatus && resolvedStockStatus !== 'all' && resolvedStockStatus !== 'All Stock Status' && resolvedStockStatus !== 'All Stock') {
+    const normalizedStock = resolvedStockStatus.toLowerCase();
+    switch (normalizedStock) {
+      case 'in_stock':
+      case 'in stock':
       case 'active':
-        filter.status = 'active';
         filter.stockQuantity = { $gt: 0 };
+        // Healthy stock: greater than alert threshold AND not near expiry
+        addExprCondition({
+          $and: [
+            {
+              $gt: [
+                '$stockQuantity',
+                {
+                  $cond: [
+                    { $gt: ['$alertQuantity', 0] },
+                    '$alertQuantity',
+                    {
+                      $cond: [
+                        { $gt: ['$minStockAlert', 0] },
+                        '$minStockAlert',
+                        { $cond: [{ $gt: ['$reorderPoint', 0] }, '$reorderPoint', 0] }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              $or: [
+                { $eq: ['$expiryDate', null] },
+                {
+                  $gt: [
+                    '$expiryDate',
+                    {
+                      $add: [
+                        now,
+                        {
+                          $multiply: [
+                            {
+                              $cond: [
+                                {
+                                  $and: [
+                                    { $ne: ['$expiryAlert', null] },
+                                    { $ne: [{ $type: '$expiryAlert' }, 'missing'] },
+                                    { $gt: ['$expiryAlert', 0] },
+                                  ],
+                                },
+                                '$expiryAlert',
+                                30,
+                              ],
+                            },
+                            86400000,
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ]
+            }
+          ]
+        });
         break;
-      case 'inactive':
-        filter.status = 'inactive';
-        break;
-      case 'sold':
-      case 'out_of_stock':
-        filter.stockQuantity = 0;
-        break;
+
       case 'low_stock':
       case 'low stock':
         filter.stockQuantity = { $gt: 0 };
-        filter.$expr = {
+        addExprCondition({
           $lte: [
             '$stockQuantity',
-            { $cond: [{ $gt: ['$alertQuantity', 0] }, '$alertQuantity', '$minStockAlert'] },
-          ],
-        };
+            {
+              $cond: [
+                { $gt: ['$alertQuantity', 0] },
+                '$alertQuantity',
+                {
+                  $cond: [
+                    { $gt: ['$minStockAlert', 0] },
+                    '$minStockAlert',
+                    { $cond: [{ $gt: ['$reorderPoint', 0] }, '$reorderPoint', 0] }
+                  ]
+                }
+              ]
+            }
+          ]
+        });
         break;
+
       case 'near_expiry':
       case 'near expiry':
         filter.expiryDate = { $ne: null };
-        filter.$expr = {
+        addExprCondition({
           $lte: [
             '$expiryDate',
             {
@@ -182,8 +272,15 @@ const buildStoreProductFilter = async (queryParams, storeId = null) => {
               ],
             },
           ],
-        };
+        });
         break;
+
+      case 'sold':
+      case 'out_of_stock':
+      case 'out of stock':
+        filter.stockQuantity = 0;
+        break;
+
       default:
         break;
     }
@@ -206,17 +303,19 @@ export const getStoreProducts = async (req, res, next) => {
       subcategory,
       brand,
       status = 'all',
+      stockStatus = 'all',
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query;
 
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
     const filter = await buildStoreProductFilter(
-      { search, productType, category, subcategory, brand, status },
+      { search, productType, category, subcategory, brand, status, stockStatus },
       storeId
     );
 
-    const total = await StoreProduct.countDocuments(filter);
+    const countRes = await StoreProduct.aggregate([{ $match: filter }, { $count: 'total' }]);
+    const total = countRes[0]?.total || 0;
     const pagination = getPagination({ page, limit, total });
 
     const pipeline = buildExpiringAndLowStockPipeline({
@@ -1161,11 +1260,11 @@ export const getStoreProductDropdownOptions = async (req, res, next) => {
  */
 export const exportStoreProducts = async (req, res, next) => {
   try {
-    const { search, productType, category, subcategory, brand, status = 'all', format = 'excel' } = req.query;
+    const { search, productType, category, subcategory, brand, status = 'all', stockStatus = 'all', format = 'excel' } = req.query;
     const storeId = req.storeEmployee?.storeId?._id || req.storeEmployee?.storeId || null;
 
     const filter = await buildStoreProductFilter(
-      { search, productType, category, subcategory, brand, status },
+      { search, productType, category, subcategory, brand, status, stockStatus },
       storeId
     );
 
