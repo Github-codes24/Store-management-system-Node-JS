@@ -139,22 +139,31 @@ const buildStoreProductFilter = async (queryParams, storeId = null) => {
     }
   };
 
+  const cleanStr = (val) => {
+    if (Array.isArray(val)) val = val[val.length - 1];
+    if (typeof val === 'string') return val.trim();
+    if (val !== null && val !== undefined) return String(val).trim();
+    return '';
+  };
+
+  const rawStatus = cleanStr(status);
+  let resolvedStockStatus = cleanStr(stockStatus);
+
   // 1. Product Status Filter (Toggle: Active / Inactive)
-  let resolvedStockStatus = stockStatus;
-  if (status && status !== 'all' && status !== 'All Status' && status !== 'All Statuses') {
-    const normalizedStatus = status.toLowerCase();
+  if (rawStatus && rawStatus.toLowerCase() !== 'all' && rawStatus !== 'All Status' && rawStatus !== 'All Statuses') {
+    const normalizedStatus = rawStatus.toLowerCase();
     if (normalizedStatus === 'active') {
       filter.status = 'active';
     } else if (normalizedStatus === 'inactive') {
       filter.status = 'inactive';
-    } else if (!resolvedStockStatus || resolvedStockStatus === 'all' || resolvedStockStatus === 'All Stock Status') {
+    } else if (!resolvedStockStatus || resolvedStockStatus.toLowerCase() === 'all' || resolvedStockStatus === 'All Stock Status') {
       // Backward compatibility: if a stock status was passed in status
-      resolvedStockStatus = status;
+      resolvedStockStatus = rawStatus;
     }
   }
 
   // 2. Stock Health Status Filter (In Stock, Low Stock, Near Expiry, Out of Stock)
-  if (resolvedStockStatus && resolvedStockStatus !== 'all' && resolvedStockStatus !== 'All Stock Status' && resolvedStockStatus !== 'All Stock') {
+  if (resolvedStockStatus && resolvedStockStatus.toLowerCase() !== 'all' && resolvedStockStatus !== 'All Stock Status' && resolvedStockStatus !== 'All Stock') {
     const normalizedStock = resolvedStockStatus.toLowerCase();
     switch (normalizedStock) {
       case 'in_stock':
